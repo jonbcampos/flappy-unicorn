@@ -1,0 +1,66 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # Lets you redeploy from the Actions tab without pushing a commit.
+  workflow_dispatch:
+
+# Pages deployment needs these; the default GITHUB_TOKEN has neither.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race. Queue rather than cancel, so a push that lands
+# mid-deploy still ends up live instead of being silently dropped.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Typechecks as part of `build`, so a type error fails the deploy rather
+      # than shipping.
+      - name: Build
+        env:
+          # Pages serves this repo from /flappy-unicorn/, not the domain root,
+          # so every asset URL needs that prefix. See vite.config.ts.
+          GH_PAGES_BASE: /flappy-unicorn/
+        run: npm run build
+
+      # index.html is the only unhashed file, and GitHub Pages sends a long
+      # max-age by default. A 404.html copy also makes deep links work.
+      - name: Add SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      # `enablement` turns Pages on for the repo if it isn't already, using the
+      # workflow's own pages:write token. Without it, someone with admin has to
+      # flip Pages on in Settings by hand before the first deploy can succeed.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

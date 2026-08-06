@@ -107,7 +107,35 @@ export function hitTestBox(
 
 export function drawScreens(ctx: CanvasRenderingContext2D, state: GameState): void {
   if (state.phase === 'title') drawTitle(ctx, state);
+  else if (state.phase === 'ready') drawReady(ctx, state);
   else if (state.phase === 'gameover') drawGameOver(ctx, state);
+}
+
+/**
+ * The pre-run prompt.
+ *
+ * No scrim: the point of the hover is to let the player look at the world they
+ * are about to fly through, and dimming it would defeat that. Just a pulsing
+ * line of text, well clear of the unicorn.
+ */
+function drawReady(ctx: CanvasRenderingContext2D, state: GameState): void {
+  const pulse = 0.65 + (Math.sin(state.readyTime * 5) + 1) * 0.175;
+
+  // Dark text, not white. Everything behind it here is pale — sky, cloud,
+  // meadow — and `glow` only stacks the same colour, so a white prompt on a
+  // white-ish sky stays low-contrast no matter how bright it pulses.
+  drawText(ctx, 'PRESS  FLY  TO  START', SCREEN.w / 2, VIRTUAL_H / 2 - 46, {
+    size: 13,
+    color: alpha(PALETTE.hudText, pulse),
+    align: 'center',
+  });
+  drawText(
+    ctx,
+    `${state.difficulty.label}  ·  ${state.difficulty.hearts}♥`,
+    SCREEN.w / 2,
+    VIRTUAL_H / 2 - 28,
+    { size: 8, color: alpha(PALETTE.hudText, 0.7), align: 'center' },
+  );
 }
 
 function drawTitle(ctx: CanvasRenderingContext2D, state: GameState): void {

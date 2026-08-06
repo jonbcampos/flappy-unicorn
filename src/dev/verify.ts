@@ -98,6 +98,11 @@ function fixedSpeedRun(id: DifficultyId, speed: number, seed = 7): {
   const state = new GameState();
   const input = new FakeInput();
   state.start(id, seed);
+  // Skip the pre-run hover. Every trial here is about the run itself, and the
+  // hover is a UI affordance — making each bot press FLY first would add a
+  // setup step to twelve trials to test one thing. That one thing gets its own
+  // trial instead: trialReadyStateIsSafe.
+  state.phase = 'playing';
   state.scrollSpeed = speed;
   return {
     state,
@@ -632,6 +637,46 @@ function trialOneHeartPerObstacle(): TrialResult {
   };
 }
 
+/**
+ * You cannot lose before you have started.
+ *
+ * The whole point of the hover: hold still for ten seconds on the harshest
+ * difficulty and nothing happens — no fall, no floor, no spawns, full hearts.
+ * Then one FLY press starts the run *and* counts as a flap, so beginning costs
+ * no altitude.
+ */
+function trialReadyStateIsSafe(): TrialResult {
+  const state = new GameState();
+  const input = new FakeInput();
+  state.start('hard', 3);
+
+  for (let i = 0; i < Math.ceil(10 / FIXED_DT); i++) {
+    input.tick(FIXED_DT);
+    state.update(FIXED_DT, asInput(input));
+  }
+
+  const heldStill =
+    state.phase === 'ready' &&
+    state.player.hp === DIFFICULTIES.hard.hearts &&
+    state.gates.items.every((g) => !g.active) &&
+    Math.abs(state.player.y - (CEILING_Y + FLOOR_Y) / 2) < 8;
+
+  input.press('fly');
+  input.tick(FIXED_DT);
+  state.update(FIXED_DT, asInput(input));
+
+  return {
+    trial: 'cannot lose before the run starts',
+    difficulty: 'hard',
+    detail: heldStill
+      ? `held 10s at y=${state.player.y.toFixed(1)}, FLY -> ${state.phase}, vy=${state.player.vy.toFixed(0)}`
+      : `hover leaked: phase ${state.phase}, ${state.player.hp} hearts`,
+    // vy must be negative: the starting press has to be a real flap, not just
+    // a state change that drops you.
+    pass: heldStill && state.phase === 'playing' && state.player.vy < 0,
+  };
+}
+
 /** Doing nothing on HARD must actually reach the game-over screen. */
 function trialGameOver(): TrialResult {
   const { state, input, step } = fixedSpeedRun('hard', speedRange(DIFFICULTIES.hard).min);
@@ -771,6 +816,7 @@ export function verify(): TrialResult[] {
   }
 
   results.push(trialOneHeartPerObstacle());
+  results.push(trialReadyStateIsSafe());
   results.push(trialGameOver());
   results.push(trialFlapArcInvariance());
 

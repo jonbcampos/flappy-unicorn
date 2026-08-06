@@ -44,7 +44,9 @@ export const sceneRenderer: Renderer = {
     ctx.restore();
 
     drawHud(ctx, state);
-    if (state.phase === 'playing') drawTouchpad(ctx, input);
+    // Controls are up during the hover too — the prompt says "press FLY", so
+    // FLY had better be on screen to press.
+    if (state.phase === 'playing' || state.phase === 'ready') drawTouchpad(ctx, input);
     drawScreens(ctx, state);
   },
 };

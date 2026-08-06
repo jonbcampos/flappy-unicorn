@@ -114,10 +114,7 @@ export class Unicorn {
     }
 
     // Buffered rather than edge-read, so a flap pressed slightly early lands.
-    if (input.consume('fly')) {
-      this.vy = -flapVelocityAt(scrollSpeed);
-      this.justFlapped = true;
-    }
+    if (input.consume('fly')) this.flap(scrollSpeed);
 
     this.vy = Math.min(this.vy + gravity * dt, terminalVyAt(scrollSpeed));
     this.y += this.vy * dt;
@@ -137,6 +134,33 @@ export class Unicorn {
     }
 
     return shot;
+  }
+
+  /**
+   * One flap.
+   *
+   * Public because the run's opening press is a flap too — starting the level
+   * and flapping are the same action, so they'd better be the same code.
+   */
+  flap(scrollSpeed: number): void {
+    this.vy = -flapVelocityAt(scrollSpeed);
+    this.justFlapped = true;
+  }
+
+  /**
+   * Bob on the spot during the pre-run hover.
+   *
+   * Not physics — position is assigned outright, and gravity never runs. A
+   * "hover" implemented as thrust fighting gravity would drift, and drifting
+   * into the floor before the player has pressed anything is the exact problem
+   * the ready state exists to remove.
+   */
+  hover(time: number): void {
+    const centre = (CEILING_Y + FLOOR_Y) / 2;
+    this.prevY = this.y;
+    this.y = centre + Math.sin(time * 2.4) * 5;
+    this.vy = 0;
+    this.tilt = Math.sin(time * 2.4 + Math.PI / 2) * 0.1;
   }
 
   /**

@@ -32,7 +32,16 @@ import { GateField } from './gates';
 import { ShotPool } from './projectiles';
 import { Unicorn } from './player';
 
-export type Phase = 'title' | 'playing' | 'gameover';
+/**
+ * 'ready' is the hover before the run starts.
+ *
+ * Without it a run opens with the unicorn already falling, so the first thing
+ * the game does is drop you — you're reacting before you've looked at the
+ * screen. The world holds still, the unicorn bobs in place, and nothing can hurt
+ * you until you press FLY. That first press is also a real flap, so starting
+ * costs no altitude.
+ */
+export type Phase = 'title' | 'ready' | 'playing' | 'gameover';
 
 export type GameEventType =
   | 'flap'
@@ -108,10 +117,14 @@ export class GameState {
     }
   }
 
+  /** Advances only during 'ready', to drive the hover bob. */
+  readyTime = 0;
+
   start(difficultyId: DifficultyId, seed: number): void {
     this.difficulty = DIFFICULTIES[difficultyId];
     this.rng = new Rng(seed);
-    this.phase = 'playing';
+    this.phase = 'ready';
+    this.readyTime = 0;
     this.score = 0;
     this.gatesPassed = 0;
     this.elapsed = 0;
@@ -133,6 +146,10 @@ export class GameState {
 
   update(dt: number, input: Input): void {
     input.tick(dt);
+    if (this.phase === 'ready') {
+      this.updateReady(dt, input);
+      return;
+    }
     if (this.phase !== 'playing') return;
 
     // Hitstop freezes the entire simulation, input included. A few frames of
@@ -183,6 +200,30 @@ export class GameState {
     }
 
     if (this.player.fallenOffScreen) this.endRun();
+  }
+
+  /**
+   * The hover before the run begins.
+   *
+   * Nothing moves, nothing spawns, nothing can hurt you. The unicorn bobs on the
+   * spot so the screen doesn't look frozen or broken — a completely static
+   * screen reads as "the game hasn't loaded", which is its own kind of bad
+   * first impression.
+   *
+   * MAGIC is deliberately inert here. Letting it fire would mean the run can be
+   * started by either button, and the prompt says FLY.
+   */
+  private updateReady(dt: number, input: Input): void {
+    this.readyTime += dt;
+    this.player.hover(this.readyTime);
+
+    if (!input.consume('fly')) return;
+
+    this.phase = 'playing';
+    // The press that starts the run is also a real flap, so beginning costs no
+    // altitude and the control feels immediately connected.
+    this.player.flap(this.scrollSpeed);
+    this.emit('flap', PLAYER_X, this.player.y);
   }
 
   private applyPlacements(placements: Placements): void {

@@ -55,6 +55,10 @@ sprites, i-frames after a hit, and a FLY hit region covering the whole right hal
 A five-year-old cannot reliably land a 30px circle while panicking, and unlike a missed shot, a
 missed flap costs a heart.
 
+**5. A run opens hovering.** Picking a difficulty puts you in a `ready` phase — the world holds
+still and nothing can hurt you until you press FLY, and that first press is a real flap, so
+starting lifts you rather than dropping you.
+
 ### Verifying it
 
 The fairness guarantees are machine-checkable, because they're the thing most likely to break
@@ -64,12 +68,12 @@ silently when someone re-tunes a flap:
 __game.verify()   // in the browser console, dev builds only
 ```
 
-50 trials, run against the **real `GameState`** driven by a fake input — not against the
+51 trials, run against the **real `GameState`** driven by a fake input — not against the
 arithmetic in `config.ts`. They cover gap threading at seven speeds per difficulty, coasting a gap
 with no flap at all, gate-to-gate reachability over 300s of the real director, that no bomb ever
 lands in the safe corridor, that every blocking bomb is *both* killable and dodgeable, that
-fairies are harmless, that one obstacle costs exactly one heart, and that the flap arc really is
-speed-invariant.
+fairies are harmless, that one obstacle costs exactly one heart, that you can't lose before the
+run starts, and that the flap arc really is speed-invariant.
 
 `validateDesignContracts()` also runs on every page load and logs to the console if any tuning
 number stops satisfying its guarantee.

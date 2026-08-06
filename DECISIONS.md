@@ -288,7 +288,38 @@ both — every trial reports what it actually measured, not just PASS.
 - **Distance as score.** Rewards hovering in open sky. Score is gates × 10 plus rescues, which
   rewards the thing the game is about.
 
-## 19. The FLY hit region is the whole right half of the screen
+## 19. A run opens hovering, not falling
+
+First real playtest note, and it was the right call: *"it's not cool that you start immediately
+thrown to the ground."*
+
+Picking a difficulty used to drop you straight into `playing` with gravity already on, so the
+game's opening move was to make you fall before you'd looked at the screen. Now `start()` enters a
+`ready` phase — the world holds still, nothing spawns, nothing can hurt you, and the unicorn bobs
+in place until you press FLY.
+
+Three details that matter more than they look:
+
+- **The starting press is a real flap.** `updateReady` calls the same `player.flap()` the run
+  uses, so beginning costs no altitude and the control feels connected from the first frame. A
+  state change that merely unfreezes gravity would reintroduce the original complaint with an
+  extra tap in front of it.
+- **The hover is assigned, not simulated.** `player.hover()` writes `y` outright with gravity
+  never running. A hover built as thrust cancelling gravity drifts, and drifting into the floor
+  before the player has pressed anything is precisely what this exists to prevent.
+- **It bobs rather than freezing.** A completely static screen reads as "the game hasn't loaded".
+
+MAGIC is inert during the hover, so the run can only start the way the prompt says.
+
+`trialReadyStateIsSafe` holds still for ten seconds on HARD and asserts full hearts, no spawns, no
+drift, and that the first FLY press yields a *negative* vy. The twelve run-focused trials skip the
+phase by setting `state.phase = 'playing'` directly, rather than each growing a setup step to test
+something one trial already covers.
+
+**Revisit if:** restarting repeatedly starts to feel slow. The lever would be letting the game-over
+RETRY skip straight to `playing`, not removing the hover.
+
+## 20. The FLY hit region is the whole right half of the screen
 
 The circle is the affordance; the hit region is enormous. A five-year-old cannot reliably land a
 30px circle while panicking, and unlike every other control in either game a missed flap is not a

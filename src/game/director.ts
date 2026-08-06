@@ -7,12 +7,15 @@ import {
   GATE,
   PLAYER_X,
   SHOT,
+  MOVING_GATE,
   UNICORN,
   WORLD,
+  biomeAt,
   corridorClearance,
   spawnX,
   type Difficulty,
 } from './config';
+import type { GateVariant } from './gates';
 import { type Corridor, bandLimits, clearsLane, laneY, reachableCentreRange } from './corridor';
 
 export interface BombPlacement {
@@ -28,7 +31,14 @@ export interface FairyPlacement {
 }
 
 export interface Placements {
-  gate: { centreY: number; gapHeight: number; variant: 'arch' | 'tower' };
+  gate: {
+    centreY: number;
+    gapHeight: number;
+    variant: GateVariant;
+    /** 0 for a still gate. */
+    amplitude: number;
+    phase: number;
+  };
   bombs: BombPlacement[];
   fairies: FairyPlacement[];
 }
@@ -37,6 +47,8 @@ export interface DirectorContext {
   difficulty: Difficulty;
   sector: number;
   scrollSpeed: number;
+  /** World distance travelled, so placement can ask which biome it's in. */
+  distance: number;
   rng: Rng;
 }
 
@@ -93,6 +105,8 @@ export class GateDirector {
    * entirely beyond the right edge and scrolls in like everything else.
    */
   private pendingCentre = (CEILING_Y + FLOOR_Y) / 2;
+  private pendingAmplitude = 0;
+  private pendingPhase = 0;
 
   get secondsUntilNextGate(): number {
     return this.timer;
@@ -101,6 +115,10 @@ export class GateDirector {
   reset(difficulty: Difficulty): void {
     this.timer = WORLD.openingRest * difficulty.spacingScale;
     this.pendingCentre = (CEILING_Y + FLOOR_Y) / 2;
+    // The first gate never drifts. An opening gate is the one the player uses
+    // to work out what a gate even is.
+    this.pendingAmplitude = 0;
+    this.pendingPhase = 0;
   }
 
   update(dt: number, ctx: DirectorContext, emit: (placements: Placements) => void): void {
@@ -111,6 +129,8 @@ export class GateDirector {
 
     const gapHeight = ctx.difficulty.gapHeight;
     const centreY = this.pendingCentre;
+    const amplitude = this.pendingAmplitude;
+    const phase = this.pendingPhase;
 
     // Open space that will exist between this gate and the next one.
     //
@@ -126,7 +146,21 @@ export class GateDirector {
     // this, which only makes the next gate easier to reach — that residual
     // error is in the safe direction.
     const dx = Math.max(0, this.timer * ctx.scrollSpeed - GATE.width);
-    const range = reachableCentreRange(centreY, dx, ctx.scrollSpeed, gapHeight);
+
+    // Decide whether the *next* gate drifts before choosing where it sits, so
+    // its swing is inside the reachability budget rather than added on after.
+    const nextAmplitude =
+      ctx.sector >= MOVING_GATE.fromSector && ctx.rng.next() < ctx.difficulty.movingGateShare
+        ? MOVING_GATE.amplitude
+        : 0;
+    const worstAmplitude = Math.max(amplitude, nextAmplitude);
+    const range = reachableCentreRange(
+      centreY,
+      dx,
+      ctx.scrollSpeed,
+      gapHeight,
+      worstAmplitude,
+    );
     const nextCentre = ctx.rng.range(range.min, range.max);
 
     // Everything from here is off-screen, to the right of the gate spawning now.
@@ -135,18 +169,37 @@ export class GateDirector {
       endX: spawnX() + GATE.width + dx,
       startY: centreY,
       endY: nextCentre,
-      halfHeight: gapHeight / 2,
+      // Widened by the swing, so hazard clearance is measured against the
+      // worst position the opening can be in, not its average one.
+      halfHeight: gapHeight / 2 + worstAmplitude,
     };
 
-    const variant: 'arch' | 'tower' =
-      ctx.sector >= GATE.towerFromSector && ctx.rng.next() < 0.4 ? 'tower' : 'arch';
-
-    const bombs = this.placeBombs(corridor, ctx);
+    const bombs = this.placeBombs(corridor, ctx, worstAmplitude);
     const fairies = this.placeFairies(corridor, ctx, bombs);
 
     this.pendingCentre = nextCentre;
+    this.pendingAmplitude = nextAmplitude;
+    this.pendingPhase = ctx.rng.range(0, Math.PI * 2);
 
-    emit({ gate: { centreY, gapHeight, variant }, bombs, fairies });
+    emit({
+      gate: { centreY, gapHeight, variant: this.variantFor(ctx), amplitude, phase },
+      bombs,
+      fairies,
+    });
+  }
+
+  /**
+   * Which gate sprite to use.
+   *
+   * Chosen from the biome at the spawn point rather than from the sector, so a
+   * gate looks like the place it's standing in. Fixed at spawn and never
+   * revisited — a gate that restyled itself mid-flight would look like a
+   * different obstacle arriving.
+   */
+  private variantFor(ctx: DirectorContext): GateVariant {
+    if (biomeAt(ctx.distance + spawnX()) === 'town') return 'gatehouse';
+    if (ctx.sector >= GATE.towerFromSector && ctx.rng.next() < 0.4) return 'tower';
+    return 'arch';
   }
 
   /** Spacing tightens with the sector, floored so it never becomes a blur. */
@@ -172,7 +225,11 @@ export class GateDirector {
    * at once. It always has two answers — shoot it, or fly the wide side — and
    * both are guaranteed here rather than hoped for.
    */
-  private placeBombs(corridor: Corridor, ctx: DirectorContext): BombPlacement[] {
+  private placeBombs(
+    corridor: Corridor,
+    ctx: DirectorContext,
+    amplitude: number,
+  ): BombPlacement[] {
     const out: BombPlacement[] = [];
     if (ctx.rng.next() >= ctx.difficulty.bombChance) return out;
 
@@ -183,7 +240,7 @@ export class GateDirector {
       maxKillableBombs(ctx.scrollSpeed) >= 2;
 
     if (wantsBlocking) {
-      const blocking = this.placeBlockingBomb(corridor, ctx);
+      const blocking = this.placeBlockingBomb(corridor, ctx, amplitude);
       if (blocking) {
         out.push(blocking);
         return out;
@@ -191,13 +248,19 @@ export class GateDirector {
       // Fall through to an aside bomb if there was no legal blocking spot.
     }
 
-    const aside = this.placeAsideBomb(corridor, ctx);
+    const aside = this.placeAsideBomb(corridor, ctx, amplitude);
     if (aside) out.push(aside);
     return out;
   }
 
-  private placeAsideBomb(corridor: Corridor, ctx: DirectorContext): BombPlacement | null {
-    const clearance = corridorClearance(ctx.difficulty.gapHeight);
+  private placeAsideBomb(
+    corridor: Corridor,
+    ctx: DirectorContext,
+    amplitude: number,
+  ): BombPlacement | null {
+    // A drifting gate drags the safe line with it, so the clearance a bomb must
+    // keep grows by the full swing.
+    const clearance = corridorClearance(ctx.difficulty.gapHeight) + amplitude;
     const span = corridor.endX - corridor.startX;
     // Middle 60% of the span, so a bomb never crowds either gate mouth.
     const minX = corridor.startX + span * 0.2;
@@ -216,10 +279,20 @@ export class GateDirector {
     return null;
   }
 
-  private placeBlockingBomb(corridor: Corridor, ctx: DirectorContext): BombPlacement | null {
+  private placeBlockingBomb(
+    corridor: Corridor,
+    ctx: DirectorContext,
+    amplitude: number,
+  ): BombPlacement | null {
     const minX = corridor.startX + BOMB.minGateClearance;
     const maxX = corridor.endX - BOMB.minGateClearance;
     if (maxX <= minX) return null;
+
+    // A blocking bomb is placed a fixed 12px off the safe line, which only
+    // leaves a dodge lane if the line stays put. Next to a drifting gate the
+    // line moves under it, so don't place one at all — downgrade to an aside
+    // bomb, which keeps clearance from the whole swing.
+    if (amplitude > 0) return null;
 
     const x = ctx.rng.range(minX, maxX);
     const lane = laneY(corridor, x);

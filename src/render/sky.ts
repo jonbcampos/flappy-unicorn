@@ -1,4 +1,12 @@
-import { CEILING_Y, FLOOR_Y, SCREEN, VIRTUAL_H } from '../game/config';
+import {
+  BIOME_SPAN,
+  CEILING_Y,
+  FLOOR_Y,
+  SCREEN,
+  VIRTUAL_H,
+  biomeAt,
+  type Biome,
+} from '../game/config';
 import { PALETTE, alpha } from './palette';
 
 /**
@@ -53,23 +61,103 @@ export function drawCeiling(ctx: CanvasRenderingContext2D, distance: number): vo
   ctx.fillRect(0, CEILING_Y - 2, SCREEN.w, 2);
 }
 
-/** The floor: meadow, with a bright lip sitting exactly on the hitbox. */
+/**
+ * The floor: meadow or cobbled street, with a bright lip on the hitbox.
+ *
+ * Drawn in spans rather than as one fill, because the biome changes with world
+ * position and the changeover has to *scroll across* the screen like everything
+ * else. Repainting the whole strip the moment a boundary is crossed would make
+ * the ground under the player change colour instantaneously.
+ */
 export function drawFloor(ctx: CanvasRenderingContext2D, distance: number): void {
-  ctx.fillStyle = PALETTE.meadow;
-  ctx.fillRect(0, FLOOR_Y, SCREEN.w, VIRTUAL_H - FLOOR_Y);
+  forEachBiomeSpan(distance, (biome, screenX, spanW, spanWorldX) => {
+    if (biome === 'town') drawCobbles(ctx, screenX, spanW, spanWorldX);
+    else drawMeadow(ctx, screenX, spanW, spanWorldX);
+  });
 
+  // The lip runs unbroken across both: it's the hitbox, and the hitbox does not
+  // care which biome it's in. Colour follows the biome under it, so the boundary
+  // stays visible without the line ever breaking.
   ctx.fillStyle = PALETTE.floorLip;
   ctx.fillRect(0, FLOOR_Y, SCREEN.w, 3);
+}
+
+function drawMeadow(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  spanW: number,
+  spanWorldX: number,
+): void {
+  ctx.fillStyle = PALETTE.meadow;
+  ctx.fillRect(screenX, FLOOR_Y, spanW, VIRTUAL_H - FLOOR_Y);
 
   // Grass tufts strictly BELOW the lip. A tuft poking up through it would be a
   // sprite claiming ground the hitbox doesn't own.
   ctx.fillStyle = alpha(PALETTE.nearHill, 0.8);
   const spacing = 14;
-  const offset = distance % spacing;
-  for (let x = -offset; x < SCREEN.w + spacing; x += spacing) {
-    const seed = Math.abs(Math.floor((x + distance) / spacing)) * 2246822519;
+  const first = Math.ceil(spanWorldX / spacing) * spacing;
+  for (let wx = first; wx < spanWorldX + spanW; wx += spacing) {
+    const seed = Math.abs(Math.floor(wx / spacing)) * 2246822519;
     const h = 3 + ((seed >>> 4) % 4);
-    ctx.fillRect(Math.round(x), FLOOR_Y + 3, 2, h);
+    ctx.fillRect(Math.round(screenX + (wx - spanWorldX)), FLOOR_Y + 3, 2, h);
+  }
+}
+
+function drawCobbles(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  spanW: number,
+  spanWorldX: number,
+): void {
+  ctx.fillStyle = PALETTE.cobble;
+  ctx.fillRect(screenX, FLOOR_Y, spanW, VIRTUAL_H - FLOOR_Y);
+
+  // Staggered stones, again strictly below the lip.
+  ctx.fillStyle = PALETTE.cobbleDark;
+  const w = 11;
+  const h = 6;
+  for (let row = 0; row < 4; row++) {
+    const y = FLOOR_Y + 4 + row * (h + 2);
+    if (y > VIRTUAL_H) break;
+    const stagger = row % 2 === 0 ? 0 : w / 2;
+    const first = Math.floor((spanWorldX - stagger) / w) * w + stagger;
+    for (let wx = first; wx < spanWorldX + spanW; wx += w) {
+      const x = screenX + (wx - spanWorldX);
+      const clipL = Math.max(x, screenX);
+      const clipR = Math.min(x + w - 2, screenX + spanW);
+      if (clipR > clipL) ctx.fillRect(Math.round(clipL), y, Math.round(clipR - clipL), h);
+    }
+  }
+}
+
+// --- biome spans ------------------------------------------------------------
+
+/**
+ * Walk the visible strip, calling back once per run of a single biome.
+ *
+ * The whole reason the town works: biome is a function of *world position*, so
+ * a boundary is a vertical line that scrolls in from the right and passes over
+ * you. You fly out of the meadow and into the town. Deriving the biome from the
+ * sector number instead — the obvious first idea — swaps every pixel of scenery
+ * between one frame and the next, which reads as the renderer glitching rather
+ * than as arriving somewhere.
+ *
+ * Callback receives (biome, screen x, span width, world x of the span start).
+ */
+export function forEachBiomeSpan(
+  distance: number,
+  draw: (biome: Biome, screenX: number, spanW: number, spanWorldX: number) => void,
+): void {
+  const left = distance;
+  const right = distance + SCREEN.w;
+  let worldX = left;
+  while (worldX < right) {
+    const biome = biomeAt(worldX);
+    // Where this biome's run ends, clamped to the right edge of the screen.
+    const boundary = (Math.floor(worldX / BIOME_SPAN) + 1) * BIOME_SPAN;
+    const end = Math.min(boundary, right);
+    draw(biome, worldX - left, end - worldX, worldX);
+    worldX = end;
   }
 }
 
@@ -84,9 +172,59 @@ export function drawBackground(ctx: CanvasRenderingContext2D, distance: number):
 
   drawScenicRainbow(ctx, distance * 0.06);
   drawClouds(ctx, distance * 0.14, 34, 0.5);
-  drawHills(ctx, distance * 0.3, PALETTE.midHill, 46, 30);
+  // Midground and near ground are biome-aware; the sky above them is not. A
+  // town has the same weather as the field outside it.
+  drawMidground(ctx, distance);
   drawPetals(ctx, distance * 0.42);
-  drawHills(ctx, distance * 0.55, PALETTE.nearHill, 62, 18);
+  drawNearground(ctx, distance);
+}
+
+/** The far layer: rolling hills, or the roofs of the town behind its wall. */
+function drawMidground(ctx: CanvasRenderingContext2D, distance: number): void {
+  drawLayer(distance, 0.3, 46, (biome, x, seed) => {
+    if (biome === 'town') drawFarRoof(ctx, x, seed);
+    else drawHill(ctx, x, seed, PALETTE.midHill, 46, 30);
+  });
+}
+
+function drawNearground(ctx: CanvasRenderingContext2D, distance: number): void {
+  drawLayer(distance, 0.55, 62, (biome, x, seed) => {
+    if (biome === 'town') drawBuilding(ctx, x, seed);
+    else drawHill(ctx, x, seed, PALETTE.nearHill, 62, 18);
+  });
+}
+
+/**
+ * Shared element walk for a parallax layer.
+ *
+ * The biome lookup divides the element's position by the layer's parallax rate
+ * before asking, and that division is the whole trick. A layer scrolling at
+ * 0.55 has covered 0.55x the world by the time the player has covered all of
+ * it, so asking `biomeAt(layerOffset)` puts that layer most of a biome span
+ * behind — which is how the first version ended up drawing green hills standing
+ * on a cobbled street. Converting back to player-world coordinates first makes
+ * every layer agree about where "here" is.
+ *
+ * It also keeps the transition pop-free: an element's style depends only on its
+ * own fixed world position, so nothing ever restyles itself mid-scroll. Slower
+ * layers simply change over slightly earlier, which reads as the town being
+ * visible in the distance before you reach it.
+ */
+function drawLayer(
+  distance: number,
+  rate: number,
+  spacing: number,
+  drawOne: (biome: Biome, screenX: number, seed: number) => void,
+): void {
+  const offset = distance * rate;
+  const start = Math.floor(offset / spacing) * spacing;
+  for (let i = 0; i * spacing < SCREEN.w + spacing * 3; i++) {
+    const worldX = start + i * spacing;
+    const x = worldX - offset;
+    if (x > SCREEN.w + spacing || x < -spacing * 2) continue;
+    const seed = Math.abs(Math.floor(worldX / spacing)) * 2654435761;
+    drawOne(biomeAt(worldX / rate), x, seed);
+  }
 }
 
 /**
@@ -153,26 +291,95 @@ export function puff(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
   ctx.fillRect(x + w * 0.52, y + h * 0.12, w * 0.34, h * 0.7);
 }
 
-function drawHills(
+function drawHill(
   ctx: CanvasRenderingContext2D,
-  offset: number,
+  x: number,
+  seed: number,
   colour: string,
   spacing: number,
   maxHeight: number,
 ): void {
   ctx.fillStyle = colour;
-  const start = Math.floor(offset / spacing) * spacing;
-  for (let i = 0; i * spacing < SCREEN.w + spacing * 3; i++) {
-    const worldX = start + i * spacing;
-    const x = worldX - offset;
-    if (x > SCREEN.w + spacing || x < -spacing * 2) continue;
-    const seed = Math.abs(Math.floor(worldX / spacing)) * 2654435761;
-    const h = ((seed >>> 5) % maxHeight) + 14;
-    // Stepped mound rather than a rectangle, so hills read as rolling.
-    const w = spacing + 16;
-    ctx.fillRect(Math.round(x), Math.round(FLOOR_Y - h * 0.55), w, h);
-    ctx.fillRect(Math.round(x + w * 0.18), Math.round(FLOOR_Y - h * 0.85), w * 0.64, h);
-    ctx.fillRect(Math.round(x + w * 0.34), Math.round(FLOOR_Y - h), w * 0.3, h);
+  const h = ((seed >>> 5) % maxHeight) + 14;
+  // Stepped mound rather than a rectangle, so hills read as rolling.
+  const w = spacing + 16;
+  ctx.fillRect(Math.round(x), Math.round(FLOOR_Y - h * 0.55), w, h);
+  ctx.fillRect(Math.round(x + w * 0.18), Math.round(FLOOR_Y - h * 0.85), w * 0.64, h);
+  ctx.fillRect(Math.round(x + w * 0.34), Math.round(FLOOR_Y - h), w * 0.3, h);
+}
+
+/** Distant rooftops, hazed toward the sky so they sit behind everything. */
+function drawFarRoof(ctx: CanvasRenderingContext2D, x: number, seed: number): void {
+  const h = 24 + ((seed >>> 5) % 34);
+  const w = 46 + ((seed >>> 11) % 18);
+  const top = FLOOR_Y - h;
+
+  ctx.fillStyle = PALETTE.townFar;
+  ctx.fillRect(Math.round(x), Math.round(top + 8), w, h);
+
+  // Stepped gable — a pitched roof without needing a triangle.
+  ctx.fillRect(Math.round(x + 6), Math.round(top + 4), w - 12, 6);
+  ctx.fillRect(Math.round(x + 12), Math.round(top), w - 24, 6);
+
+  // A spire on some of them, so the skyline isn't a flat row of boxes.
+  if ((seed >>> 17) % 3 === 0) {
+    ctx.fillRect(Math.round(x + w * 0.45), Math.round(top - 16), 5, 18);
+  }
+}
+
+/**
+ * A near brick building: wall, mortar courses, windows, pitched roof.
+ *
+ * Kept firmly below the play band's midpoint and drawn in muted stone. It's
+ * scenery, and the standing rule for this file is that scenery must never be
+ * mistakable for something you have to act on — no bright accents, nothing
+ * pulsing, nothing round and dark.
+ */
+function drawBuilding(ctx: CanvasRenderingContext2D, x: number, seed: number): void {
+  // Capped well below the middle of the band. Tall background buildings crowd
+  // the airspace the gates live in, and a gate has to be the most legible
+  // vertical thing on screen.
+  const h = 26 + ((seed >>> 5) % 32);
+  const w = 58 + ((seed >>> 13) % 20);
+  const top = FLOOR_Y - h;
+
+  ctx.fillStyle = PALETTE.buildingWall;
+  ctx.fillRect(Math.round(x), Math.round(top), w, h);
+
+  // Mortar courses. Two-pixel bands are enough to read as brickwork at this
+  // scale, and a full brick grid turns into visual noise that competes with
+  // the gates.
+  ctx.fillStyle = alpha(PALETTE.brickMortar, 0.3);
+  for (let y = top + 7; y < FLOOR_Y - 2; y += 7) {
+    ctx.fillRect(Math.round(x), Math.round(y), w, 1);
+  }
+
+  // Roof, overhanging slightly on both sides.
+  ctx.fillStyle = PALETTE.buildingRoof;
+  ctx.fillRect(Math.round(x - 3), Math.round(top - 5), w + 6, 6);
+  ctx.fillStyle = alpha(PALETTE.roofDark, 0.65);
+  ctx.fillRect(Math.round(x + 4), Math.round(top - 10), w - 8, 6);
+
+  // Windows: small and square, and never dark. The darkest thing on screen is
+  // always a bomb — that is a rule, and a row of black windows would break it.
+  ctx.fillStyle = PALETTE.buildingWindow;
+  const cols = Math.max(2, Math.floor(w / 22));
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r * 18 < h - 20; r++) {
+      ctx.fillRect(
+        Math.round(x + 9 + c * 22),
+        Math.round(top + 10 + r * 18),
+        7,
+        9,
+      );
+    }
+  }
+
+  // An occasional banner, for the medieval read.
+  if ((seed >>> 19) % 4 === 0) {
+    ctx.fillStyle = alpha(PALETTE.banner, 0.7);
+    ctx.fillRect(Math.round(x + w - 14), Math.round(top + 4), 6, 16);
+    ctx.fillRect(Math.round(x + w - 13), Math.round(top + 20), 4, 3);
   }
 }
 

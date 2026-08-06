@@ -1,8 +1,8 @@
 import type { Aabb } from '../game/collision';
-import { BOMB, FAIRY, GATE, SHOT, UNICORN } from '../game/config';
+import { BOMB, CEILING_Y, FAIRY, FLOOR_Y, GATE, SHOT, UNICORN } from '../game/config';
 import type { Bomb } from '../game/bombs';
 import type { Fairy } from '../game/fairies';
-import { GateField, type Gate } from '../game/gates';
+import type { Gate } from '../game/gates';
 import type { GameState } from '../game/state';
 import { PALETTE, alpha } from './palette';
 import { puff } from './sky';
@@ -156,8 +156,41 @@ export function drawGates(
   for (const gate of state.gates.items) {
     if (!gate.active) continue;
     const x = gate.prevX + (gate.x - gate.prevX) * interpolation;
-    if (gate.variant === 'tower') drawTowerGate(ctx, gate, x);
-    else drawArchGate(ctx, gate, x);
+    // A moving gate's opening is interpolated too, or it stutters vertically at
+    // exactly the moment the player is judging how much room they have.
+    const centreY = gate.prevCentreY + (gate.centreY - gate.prevCentreY) * interpolation;
+    if (gate.variant === 'tower') drawTowerGate(ctx, gate, x, centreY);
+    else if (gate.variant === 'gatehouse') drawGatehouse(ctx, gate, x, centreY);
+    else drawArchGate(ctx, gate, x, centreY);
+
+    if (gate.amplitude > 0) drawDriftMarks(ctx, gate, x, centreY);
+  }
+}
+
+/**
+ * Chevrons on a drifting gate's lips.
+ *
+ * A moving gap has to *announce* that it moves. Without a tell the player reads
+ * a gate, commits to an altitude, and only discovers it was the moving kind
+ * when it closes on them — which is indistinguishable from the game cheating.
+ * The marks point along the direction of travel, so the tell also says which
+ * way it's currently going.
+ */
+function drawDriftMarks(
+  ctx: CanvasRenderingContext2D,
+  gate: Gate,
+  x: number,
+  centreY: number,
+): void {
+  const rising = gate.centreY < gate.prevCentreY;
+  const dir = rising ? -1 : 1;
+  const half = gate.gapHeight / 2;
+  ctx.fillStyle = alpha(PALETTE.gateLip, 0.9);
+  for (let i = 0; i < 3; i++) {
+    const w = 6 - i * 2;
+    const cx = x + GATE.width / 2 - w / 2;
+    ctx.fillRect(Math.round(cx), Math.round(centreY - half - 6 + i * 2 * dir), w, 1);
+    ctx.fillRect(Math.round(cx), Math.round(centreY + half + 5 - i * 2 * dir), w, 1);
   }
 }
 
@@ -169,11 +202,16 @@ export function drawGates(
  * The player is reading "how much room do I have" thirty times a second, and
  * the lip is the only thing telling them the truth about where the hitbox ends.
  */
-function drawArchGate(ctx: CanvasRenderingContext2D, gate: Gate, x: number): void {
-  GateField.topBox(gate, scratch);
-  drawArchColumn(ctx, x, scratch.y, scratch.h, false);
-  GateField.bottomBox(gate, scratch);
-  drawArchColumn(ctx, x, scratch.y, scratch.h, true);
+function drawArchGate(
+  ctx: CanvasRenderingContext2D,
+  gate: Gate,
+  x: number,
+  centreY: number,
+): void {
+  const top = centreY - gate.gapHeight / 2;
+  const bottom = centreY + gate.gapHeight / 2;
+  drawArchColumn(ctx, x, CEILING_Y, top - CEILING_Y, false);
+  drawArchColumn(ctx, x, bottom, FLOOR_Y - bottom, true);
 }
 
 function drawArchColumn(
@@ -202,11 +240,74 @@ function drawArchColumn(
 }
 
 /** Cloud tower: same hitbox, softer read, unlocked later in a run. */
-function drawTowerGate(ctx: CanvasRenderingContext2D, gate: Gate, x: number): void {
-  GateField.topBox(gate, scratch);
-  drawTowerColumn(ctx, x, scratch.y, scratch.h, false);
-  GateField.bottomBox(gate, scratch);
-  drawTowerColumn(ctx, x, scratch.y, scratch.h, true);
+function drawTowerGate(
+  ctx: CanvasRenderingContext2D,
+  gate: Gate,
+  x: number,
+  centreY: number,
+): void {
+  const top = centreY - gate.gapHeight / 2;
+  const bottom = centreY + gate.gapHeight / 2;
+  drawTowerColumn(ctx, x, CEILING_Y, top - CEILING_Y, false);
+  drawTowerColumn(ctx, x, bottom, FLOOR_Y - bottom, true);
+}
+
+/**
+ * The town's gate: a brick gatehouse with battlements.
+ *
+ * Same hitbox as an arch, same white lip on the opening. The lip is
+ * non-negotiable across every variant — it is how the player reads the gap, and
+ * a themed gate that dropped it would be pretty and unfair.
+ */
+function drawGatehouse(
+  ctx: CanvasRenderingContext2D,
+  gate: Gate,
+  x: number,
+  centreY: number,
+): void {
+  const top = centreY - gate.gapHeight / 2;
+  const bottom = centreY + gate.gapHeight / 2;
+  drawBrickColumn(ctx, x, CEILING_Y, top - CEILING_Y, false);
+  drawBrickColumn(ctx, x, bottom, FLOOR_Y - bottom, true);
+}
+
+function drawBrickColumn(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  h: number,
+  openingAbove: boolean,
+): void {
+  if (h <= 0) return;
+  const left = Math.round(x);
+  const w = GATE.width;
+
+  ctx.fillStyle = PALETTE.brick;
+  ctx.fillRect(left, Math.round(y), w, Math.round(h));
+
+  // Staggered courses. Drawn INSIDE the column, never past its edges.
+  ctx.fillStyle = alpha(PALETTE.brickMortar, 0.45);
+  for (let row = 0; row * 6 < h; row++) {
+    const ry = Math.round(y + row * 6);
+    ctx.fillRect(left, ry, w, 1);
+    const stagger = row % 2 === 0 ? 0 : w / 2;
+    ctx.fillRect(Math.round(left + stagger + w / 4), ry, 1, 6);
+  }
+
+  ctx.fillStyle = PALETTE.brickDark;
+  ctx.fillRect(left, Math.round(y), 2, Math.round(h));
+
+  // Battlements at the opening end — crenellations cut into the column, so the
+  // silhouette says "castle" without any sprite crossing the hitbox line.
+  const lipY = openingAbove ? y : y + h - 3;
+  const notchY = openingAbove ? y + 3 : y + h - 9;
+  ctx.fillStyle = PALETTE.brickDark;
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(Math.round(left + 2 + i * 9), Math.round(notchY), 5, 6);
+  }
+
+  ctx.fillStyle = PALETTE.gateLip;
+  ctx.fillRect(left, Math.round(lipY), w, 3);
 }
 
 function drawTowerColumn(

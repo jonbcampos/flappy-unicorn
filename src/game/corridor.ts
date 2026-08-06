@@ -101,11 +101,19 @@ export function freeFallOver(dx: number, scrollSpeed: number): number {
   return atTerminal + terminalSlope * (dx - dxToTerminal);
 }
 
-/** The altitudes a gap centre may legally occupy, ignoring reachability. */
-export function bandLimits(gapHeight: number): { min: number; max: number } {
+/**
+ * The altitudes a gap centre may legally occupy, ignoring reachability.
+ *
+ * @param amplitude how far the gate will drift from this centre. The band
+ * shrinks by it on both sides, so a moving gate's *extremes* still leave a full
+ * `minColumn` of solid column. Sizing the band for the base position instead
+ * would let a drifting gate swing its opening into the ceiling, which reads as
+ * the column vanishing.
+ */
+export function bandLimits(gapHeight: number, amplitude = 0): { min: number; max: number } {
   return {
-    min: CEILING_Y + GATE.minColumn + gapHeight / 2,
-    max: FLOOR_Y - GATE.minColumn - gapHeight / 2,
+    min: CEILING_Y + GATE.minColumn + gapHeight / 2 + amplitude,
+    max: FLOOR_Y - GATE.minColumn - gapHeight / 2 - amplitude,
   };
 }
 
@@ -126,9 +134,17 @@ export function reachableCentreRange(
   dx: number,
   scrollSpeed: number,
   gapHeight: number,
+  amplitude = 0,
 ): { min: number; max: number } {
-  const band = bandLimits(gapHeight);
-  const climb = Math.min(maxClimbOver(dx, scrollSpeed) * GATE.climbSafety, GATE.maxDeltaY);
+  const band = bandLimits(gapHeight, amplitude);
+  // Both gates may be drifting, so the worst case is the previous one at the
+  // bottom of its swing and this one at the top of its. Charging that full
+  // 2·amplitude against the climb budget is what keeps a pair of moving gates
+  // from being further apart in practice than the reachability check believes.
+  const climb = Math.min(
+    Math.max(0, maxClimbOver(dx, scrollSpeed) * GATE.climbSafety - 2 * amplitude),
+    GATE.maxDeltaY,
+  );
   // Falling is free, so descending is bounded only by the authored cap.
   const drop = GATE.maxDeltaY;
 

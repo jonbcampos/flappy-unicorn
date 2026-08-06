@@ -73,23 +73,29 @@ export const MAX_FRAME_TIME = 0.25;
 
 export const UNICORN = {
   /** Wider than tall: a horse in level flight. */
-  width: 22,
-  height: 16,
+  width: 28,
+  height: 20,
   /**
    * The hurtbox sits inside the sprite. Horn, mane, tail and wingtips are all
    * decoration you cannot die by. This is invisible when it works and it is the
    * whole difference between "tight" and "this game is cheating".
+   *
+   * The insets grew along with the sprite, on purpose. The unicorn went from
+   * 22x16 to 28x20 to be easier for a small child to see, and the *hurtbox
+   * height stayed at 10* — a bigger character that is no harder to fly. Scaling
+   * the hurtbox with the art instead would have quietly made every gap tighter,
+   * which is the opposite of the reason for the change.
    */
-  hurtboxInsetX: 4,
-  hurtboxInsetY: 3, // true hurtbox: 14 x 10
+  hurtboxInsetX: 6,
+  hurtboxInsetY: 5, // true hurtbox: 16 x 10
   /** Seconds of mercy after a hit. See design contract 7 for the lower bound. */
   invulnDuration: 1.2,
   /** Where magic leaves the horn, relative to the sprite's left edge. */
-  muzzleX: 22,
+  muzzleX: 28,
 } as const;
 
 /** Hurtbox dimensions, derived so nothing re-does the arithmetic wrong. */
-export const UNICORN_HURT_W = UNICORN.width - 2 * UNICORN.hurtboxInsetX; // 14
+export const UNICORN_HURT_W = UNICORN.width - 2 * UNICORN.hurtboxInsetX; // 16
 export const UNICORN_HURT_H = UNICORN.height - 2 * UNICORN.hurtboxInsetY; // 10
 
 /**
@@ -122,16 +128,34 @@ export const INPUT_TUNING = { bufferSeconds: 0.13 } as const;
 export const FLIGHT = {
   /** Altitude gained at the apex of one flap from rest, in world px. */
   flapRise: 26,
-  /** World distance travelled while gaining it. */
-  flapRiseDistance: 42,
+  /**
+   * World distance travelled while gaining it.
+   *
+   * Raised from 42 when the unicorn's sprite grew. A wider unicorn spends
+   * longer inside a gate — the danger window is `GATE.width + UNICORN.width`,
+   * which went 48 -> 54px — and free fall across that window is quadratic in
+   * distance, so it jumped from 34 to 43px against HARD's 46px of slack. That
+   * breaks the coast-through guarantee (contract 3): the gap would start
+   * *requiring* a mid-column flap.
+   *
+   * Stretching the rise distance flattens the whole arc (curvature is
+   * `2·flapRise/flapRiseDistance²`) and brings the fall back to 33px. The flap
+   * feels marginally floatier and the apex is unchanged at exactly `flapRise`.
+   */
+  flapRiseDistance: 48,
 
   /**
    * Rails on the derived rise time, so extreme speeds stay playable. Below the
    * lower rail a flap would take most of a second; above the upper one it would
    * be a twitch. Direct analogue of the runner's jumpMin/MaxAirtime clamps.
+   *
+   * The upper rail is 0.45 rather than 0.42 so that the lower speed rail
+   * (`flapRiseDistance / flapMaxRiseTime`) stays below EASY's 112px/s opening
+   * speed. Otherwise the slowest mode would fly permanently clamped, which is
+   * exactly where the arc invariance matters most.
    */
   flapMinRiseTime: 0.16,
-  flapMaxRiseTime: 0.42,
+  flapMaxRiseTime: 0.45,
 
   /** Fall speed cap, expressed as px fallen per px of forward travel. */
   terminalSlope: 2.2,
@@ -233,6 +257,47 @@ export const GATE = {
   towerFromSector: 3,
   poolSize: 8,
 } as const;
+
+/**
+ * Gates that drift up and down.
+ *
+ * A minority of them, on purpose — the request was "some of the gates should
+ * move, not a ton". A field where everything moves stops being readable; a
+ * field where one gate in three moves makes you look at each one.
+ *
+ * The amplitude is small and the rate is slow, and both are bounded by design
+ * contracts rather than chosen by feel alone. A moving gap is the one thing in
+ * this game that can close on a player who did everything right, so the motion
+ * has to stay well inside the slack that makes a gap coastable in the first
+ * place (see contracts 16 and 17).
+ */
+export const MOVING_GATE = {
+  /** Peak offset from the gate's base centre, in px. */
+  amplitude: 14,
+  /** Radians per second. Slow enough to read as drifting, not bobbing. */
+  rate: 1.1,
+  /** Not in the opening sector — the first gates should teach the basic shape. */
+  fromSector: 2,
+} as const;
+
+// --- Biomes -----------------------------------------------------------------
+
+export type Biome = 'meadow' | 'town';
+
+/**
+ * How long a stretch of one biome lasts, in world px.
+ *
+ * Keyed to *distance* rather than to sectors so the changeover scrolls in from
+ * the right like everything else. Tying it to a sector boundary would swap the
+ * entire background between one frame and the next, which reads as a glitch
+ * rather than as arriving somewhere.
+ */
+export const BIOME_SPAN = 1500;
+
+/** Which biome a given world x falls in. */
+export function biomeAt(worldX: number): Biome {
+  return Math.floor(worldX / BIOME_SPAN) % 2 === 0 ? 'meadow' : 'town';
+}
 
 // --- Bombs ------------------------------------------------------------------
 
@@ -337,6 +402,8 @@ export interface Difficulty {
   bombChance: number;
   blockingBombShare: number;
   fairyChance: number;
+  /** Fraction of gates that drift. See MOVING_GATE. */
+  movingGateShare: number;
 }
 
 export const DIFFICULTIES: Record<DifficultyId, Difficulty> = {
@@ -351,6 +418,8 @@ export const DIFFICULTIES: Record<DifficultyId, Difficulty> = {
     bombChance: 0.22,
     blockingBombShare: 0,
     fairyChance: 0.5,
+    // A couple of drifting gates so the idea is introduced, not withheld.
+    movingGateShare: 0.15,
   },
   normal: {
     id: 'normal',
@@ -363,6 +432,7 @@ export const DIFFICULTIES: Record<DifficultyId, Difficulty> = {
     bombChance: 0.5,
     blockingBombShare: 0.3,
     fairyChance: 0.45,
+    movingGateShare: 0.3,
   },
   hard: {
     id: 'hard',
@@ -375,6 +445,7 @@ export const DIFFICULTIES: Record<DifficultyId, Difficulty> = {
     bombChance: 0.75,
     blockingBombShare: 0.5,
     fairyChance: 0.4,
+    movingGateShare: 0.45,
   },
 };
 

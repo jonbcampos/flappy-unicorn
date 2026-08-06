@@ -319,7 +319,91 @@ something one trial already covers.
 **Revisit if:** restarting repeatedly starts to feel slow. The lever would be letting the game-over
 RETRY skip straight to `playing`, not removing the hover.
 
-## 20. The FLY hit region is the whole right half of the screen
+## 20. A bigger unicorn with the same hurtbox
+
+Ellie asked for a bigger unicorn. 22x16 → 28x20.
+
+The interesting part is what *didn't* change: `hurtboxInsetY` went 3 → 5, so the hurtbox height
+stayed at exactly 10. A bigger character that is no harder to fly. Scaling the hurtbox with the
+art would have quietly tightened every gap in the game, which is the opposite of the point.
+
+It still wasn't free. The danger window — the world distance over which a gate can touch you — is
+`GATE.width + UNICORN.width`, so it went 48 → 54px, and free fall across it is *quadratic* in
+distance: 34 → 43px against HARD's 46px of slack. Contract 3 caught it on the next page load. The
+fix was to flatten the whole arc (`flapRiseDistance` 42 → 48, curvature is
+`2·flapRise/flapRiseDistance²`), bringing the fall back to 33px. The apex is untouched at exactly
+`flapRise`, so the flap feels marginally floatier and nothing else moved.
+
+`flapMaxRiseTime` went 0.42 → 0.45 in the same change, because the lower speed rail is
+`flapRiseDistance / flapMaxRiseTime` and at 48/0.42 = 114px/s it had risen above EASY's 112px/s
+opening speed — the slowest mode would have flown permanently clamped, losing the arc invariance
+exactly where it matters most.
+
+**Revisit if:** the sprite grows again. The chain is: width → danger window → fall depth →
+`flapRiseDistance`. Contract 3 will tell you.
+
+## 21. Some gates drift, and they have to announce it
+
+Also Ellie's: *"some of the gates should move, not a ton but some."* The "not a ton" is load-bearing
+— a field where everything moves stops being readable. 15/30/45% by difficulty, none in the
+opening sector, and never the very first gate of a run.
+
+A moving gap is the only thing in this game that can close on a player who did everything right,
+so it is fenced in four ways:
+
+- **`bandLimits` shrinks by the amplitude**, so a gate's *extremes* still leave a full `minColumn`.
+  Sizing the band for the base position would let a drifting gate swing its opening into the
+  ceiling, which reads as the column vanishing.
+- **Reachability charges 2×amplitude** against the climb budget — worst case is the previous gate
+  at the bottom of its swing and the next at the top of its.
+- **Blocking bombs are never placed beside a drifting gate.** A blocking bomb sits a fixed 12px off
+  the safe line and only leaves a dodge lane if that line stays put. Next to a moving gate the line
+  moves under it, so the director downgrades to an aside bomb, which keeps clearance from the whole
+  swing.
+- **Contract 17** requires the distance the gap travels during a crossing, plus the free fall over
+  the same window, to fit inside the slack. The gap cannot close on you faster than you can fall
+  through it.
+
+And a rendering rule that is really a design rule: **a drifting gate wears chevrons on its lips.**
+Without a tell, the player reads a gate, commits to an altitude, and discovers it was the moving
+kind when it closes — indistinguishable from the game cheating. The marks also point along the
+current direction of travel.
+
+**Revisit if:** the chevrons aren't enough of a tell in play. Next lever is a colour shift on the
+lip, not a smaller amplitude — the motion is already gentle.
+
+## 22. The town is a function of distance, not of sector
+
+Ellie again: the background and foreground should become a medieval brick town in places.
+
+The obvious implementation is to key the biome to the sector number. That is wrong, and visibly so:
+it swaps every pixel of scenery between one frame and the next, which reads as the renderer
+glitching rather than as arriving somewhere. `biomeAt(worldX)` keys off *world position* instead,
+so the boundary is a vertical line that scrolls in from the right and passes over you. You fly out
+of the meadow and into the town.
+
+Two things this cost:
+
+**Parallax layers have to convert back to player-world coordinates before asking.** A layer
+scrolling at 0.55 has covered 0.55× the world, so `biomeAt(layerOffset)` puts it most of a biome
+span behind — the first version drew green hills standing on a cobbled street. Dividing by the
+layer's rate makes every layer agree about where "here" is, and because an element's style depends
+only on its own fixed world position, nothing ever restyles itself mid-scroll.
+
+**The background had to be pushed back, hard.** Brick gates in front of brick buildings is
+precisely the "nothing in the background may look like a hazard" failure from decision 14, in a new
+costume. Background masonry is now a separate, hazed palette (`buildingWall` etc.), capped at 58px
+tall so it stays out of the airspace the gates live in, with pale windows — because *the darkest
+thing on screen is always a bomb*, and a row of black windows would have broken that outright.
+
+The `gatehouse` gate variant keeps the identical hitbox and the identical 3px white lip. Every
+fairness guarantee in the game is about `GATE.width`, `gapHeight` and `centreY`; none of them care
+what the column is made of.
+
+**Revisit if:** a third biome is wanted. The seam is `Biome` + `biomeAt` + the two `drawLayer`
+callbacks; nothing in `src/game/` knows biomes exist except the gate variant chooser.
+
+## 23. The FLY hit region is the whole right half of the screen
 
 The circle is the affordance; the hit region is enormous. A five-year-old cannot reliably land a
 30px circle while panicking, and unlike every other control in either game a missed flap is not a

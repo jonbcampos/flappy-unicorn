@@ -8,6 +8,7 @@ import {
   FLIGHT,
   FLOOR_Y,
   GATE,
+  MOVING_GATE,
   PLAYER_X,
   SCREEN,
   UNICORN,
@@ -677,6 +678,91 @@ function trialReadyStateIsSafe(): TrialResult {
   };
 }
 
+/**
+ * A drifting gate must be threadable by the same bot that handles a still one.
+ *
+ * Forces *every* gate to move, which is far harsher than the real share, and
+ * requires the bot to survive on nothing but "aim at where the gap is right
+ * now". If a moving gate needed lookahead the plain bot would clip a lip, which
+ * is the failure this is watching for.
+ */
+function trialMovingGateThreadable(id: DifficultyId, speed: number): TrialResult {
+  const { state, input, step } = fixedSpeedRun(id, speed, 8080);
+  const hearts = DIFFICULTIES[id].hearts;
+  let tapCooldown = 0;
+  let ticks = 0;
+  const limit = Math.ceil(25 / FIXED_DT);
+
+  while (ticks < limit && state.phase === 'playing') {
+    tapCooldown -= FIXED_DT;
+    if (tapCooldown <= 0 && shouldFlap(state)) {
+      input.press('fly');
+      tapCooldown = 1 / FLIGHT.assumedTapRate;
+    }
+    input.tick(FIXED_DT);
+    step();
+    state.bombs.reset();
+    // Force the drift on, at full amplitude, on every gate in play.
+    for (const gate of state.gates.items) {
+      if (gate.active && gate.amplitude === 0) gate.amplitude = MOVING_GATE.amplitude;
+    }
+    ticks++;
+  }
+
+  return {
+    trial: `every gate drifting @${Math.round(speed)}px/s`,
+    difficulty: id,
+    detail: `${state.gatesPassed} gates, ${state.player.hp}/${hearts} hearts`,
+    pass: state.phase === 'playing' && state.player.hp === hearts && state.gatesPassed > 3,
+  };
+}
+
+/**
+ * A drifting gate must never swing its opening into a boundary.
+ *
+ * Contract 16 proven against the real director rather than the arithmetic: run
+ * 300s and watch the actual columns, asserting neither ever drops below
+ * `minColumn`. A gate whose top column vanishes doesn't look like a hard gate,
+ * it looks like a rendering bug.
+ */
+function trialMovingGateStaysInBand(id: DifficultyId): TrialResult {
+  const { state, input, step } = fixedSpeedRun(id, speedRange(DIFFICULTIES[id]).max, 606);
+  let thinnest = Infinity;
+  let moving = 0;
+  const seen = new Set<unknown>();
+  const limit = Math.ceil(300 / FIXED_DT);
+
+  for (let i = 0; i < limit; i++) {
+    input.tick(FIXED_DT);
+    state.player.hp = 99;
+    step();
+    for (const gate of state.gates.items) {
+      // Release the slot first. Pool objects are reused, so counting them in a
+      // Set keyed on identity silently caps the tally at poolSize unless the
+      // slot is freed when its occupant despawns — the same bug that once had
+      // the bomb-corridor trial passing off a sample of three.
+      if (!gate.active) {
+        seen.delete(gate);
+        continue;
+      }
+      if (gate.amplitude > 0 && !seen.has(gate)) {
+        seen.add(gate);
+        moving++;
+      }
+      const topColumn = gate.centreY - gate.gapHeight / 2 - CEILING_Y;
+      const bottomColumn = FLOOR_Y - (gate.centreY + gate.gapHeight / 2);
+      thinnest = Math.min(thinnest, topColumn, bottomColumn);
+    }
+  }
+
+  return {
+    trial: 'drifting gates stay inside the band',
+    difficulty: id,
+    detail: `${moving} moving gates, thinnest column ${fmt(thinnest)}px (need ${GATE.minColumn})`,
+    pass: moving > 0 && thinnest >= GATE.minColumn - 0.5,
+  };
+}
+
 /** Doing nothing on HARD must actually reach the game-over screen. */
 function trialGameOver(): TrialResult {
   const { state, input, step } = fixedSpeedRun('hard', speedRange(DIFFICULTIES.hard).min);
@@ -810,6 +896,11 @@ export function verify(): TrialResult[] {
     results.push(trialFairyHarmless(id));
     results.push(trialFairyBombSeparation(id));
     results.push(trialSpawnOffScreen(id));
+    if (DIFFICULTIES[id].movingGateShare > 0) {
+      results.push(trialMovingGateThreadable(id, min));
+      results.push(trialMovingGateThreadable(id, max));
+      results.push(trialMovingGateStaysInBand(id));
+    }
     if (DIFFICULTIES[id].blockingBombShare > 0) {
       results.push(trialBlockingBombKillable(id));
     }

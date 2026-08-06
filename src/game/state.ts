@@ -13,6 +13,7 @@ import {
   GATE,
   JUICE,
   MIN_VIRTUAL_W,
+  MOVING_GATE,
   PLAYER_X,
   SHOT,
   UNICORN,
@@ -174,7 +175,7 @@ export class GameState {
       this.emit('magic', shot.x, shot.y);
     }
 
-    this.gates.update(dt, this.scrollSpeed);
+    this.gates.update(dt, this.scrollSpeed, this.elapsed);
     this.bombs.update(dt, this.scrollSpeed, this.elapsed);
     const missed = this.fairies.update(dt, this.scrollSpeed, this.elapsed);
     for (let i = 0; i < missed; i++) this.emit('fairy-missed', 0, 0);
@@ -186,6 +187,7 @@ export class GameState {
         difficulty: this.difficulty,
         sector: this.sector,
         scrollSpeed: this.scrollSpeed,
+        distance: this.distance,
         rng: this.rng,
       },
       (placements) => this.applyPlacements(placements),
@@ -228,7 +230,7 @@ export class GameState {
 
   private applyPlacements(placements: Placements): void {
     const { gate, bombs, fairies } = placements;
-    this.gates.spawn(gate.centreY, gate.gapHeight, gate.variant);
+    this.gates.spawn(gate.centreY, gate.gapHeight, gate.variant, gate.amplitude, gate.phase);
     for (const bomb of bombs) {
       this.bombs.spawn(bomb.x, bomb.y, bomb.blocking, this.rng.range(0, Math.PI * 2));
     }
@@ -546,6 +548,30 @@ export function validateDesignContracts(): string[] {
       `${label}: a blocking bomb leaves only ${wideSide.toFixed(
         1,
       )}px on its wide side — no dodge lane`,
+    );
+
+    // --- moving gates ---
+    if (difficulty.movingGateShare <= 0) continue;
+
+    check(
+      FLOOR_Y - CEILING_Y - gap - 2 * MOVING_GATE.amplitude >= 2 * GATE.minColumn,
+      `${label}: a gate drifting ±${MOVING_GATE.amplitude}px swings its opening into a boundary`,
+    );
+
+    /**
+     * A moving gap can close on a player who did everything right, so the
+     * distance it travels *during a crossing* has to come out of the same slack
+     * that makes the gap coastable. Peak drift speed is amplitude·rate.
+     */
+    const crossingSeconds = dangerWindow / sMin;
+    const drift = MOVING_GATE.amplitude * MOVING_GATE.rate * crossingSeconds;
+    check(
+      freeFallOver(dangerWindow, sMin) + drift + 8 <= freedom,
+      `${label}: a drifting gate moves ${drift.toFixed(
+        1,
+      )}px while you cross it, which with a ${freeFallOver(dangerWindow, sMin).toFixed(
+        1,
+      )}px fall exceeds ${freedom.toFixed(1)}px of slack — the gap can close on you`,
     );
   }
 

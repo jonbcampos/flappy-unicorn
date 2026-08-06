@@ -41,6 +41,21 @@ export interface Palette {
   gateLip: string;
   gateTower: string;
 
+  /** The medieval town. Warm stone against the cool sky, so it reads as built. */
+  brick: string;
+  brickDark: string;
+  brickMortar: string;
+  roof: string;
+  roofDark: string;
+  townFar: string;
+  /** Background masonry. Deliberately NOT the same stone as a gate. */
+  buildingWall: string;
+  buildingRoof: string;
+  buildingWindow: string;
+  cobble: string;
+  cobbleDark: string;
+  banner: string;
+
   bomb: string;
   bombShade: string;
   bombFuse: string;
@@ -98,6 +113,24 @@ export const RAINBOW_PALETTE: Palette = {
   gateBand: ['#ff5d8f', '#ff9f4d', '#ffe14d', '#5fd97a', '#4db8ff', '#a97bff'],
   gateLip: '#ffffff',
   gateTower: '#cfe4f7',
+
+  // Warm sandstone rather than grey granite: it has to sit under the same pale
+  // sky as the meadow without turning the whole screen gloomy.
+  brick: '#c9885f',
+  brickDark: '#9c6343',
+  brickMortar: '#e8c4a8',
+  roof: '#7a4a6b',
+  roofDark: '#5c3550',
+  townFar: '#b09ec4',
+  // Hazed toward the sky so the town recedes. A gate is saturated sandstone
+  // with a hard dark edge; a house is pale and soft. They must not be the same
+  // brick, or the player is reading brickwork to find the one that kills them.
+  buildingWall: '#dcb7a0',
+  buildingRoof: '#a3849b',
+  buildingWindow: '#b8907c',
+  cobble: '#9a8f9e',
+  cobbleDark: '#7d7382',
+  banner: '#e05a7a',
 
   // Deep navy. Nothing else in the palette is within reach of this value.
   bomb: '#1f2440',

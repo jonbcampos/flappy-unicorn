@@ -415,3 +415,22 @@ forgiveness matters.
 
 **Revisit if:** players start flapping by accident while aiming. Unlikely — MAGIC is on the other
 thumb.
+
+## 24. `viewport.ts` floors the window at one pixel
+
+Back-ported from the tower-defense game, which found it. `window.innerWidth`
+can be zero — a hidden tab, an iframe measured before layout, a preview pane
+opening — and zero divides to `NaN` a few lines later. A `NaN` scale poisons
+every coordinate derived from it until the next resize happens to arrive.
+
+It surfaced there rather than here because that game lays its whole board out
+from `SCREEN.w`, so one bad frame is a board with no cells in it. Here it merely
+produces one bad frame. That is a reason it was found late, not a reason to
+leave it: the bug is identical and it is two `Math.max` calls.
+
+`src/core/viewport.ts` is once again **byte-identical** across all three games,
+which is the property that makes copying it defensible in the first place. It
+had been the one file that diverged.
+
+**Revisit if:** it diverges again. The next divergence is the argument for
+extracting the shared core into a package rather than copying it a fourth time.

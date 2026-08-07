@@ -53,8 +53,12 @@ export class Viewport {
   }
 
   resize = (): void => {
-    const cssW = window.innerWidth;
-    const cssH = window.innerHeight;
+    // Floored at 1px. A window that reports zero — a hidden tab, an iframe
+    // measured before layout, a preview pane opening — divides to NaN here,
+    // and a NaN SCREEN.w poisons every coordinate derived from it until the
+    // next resize happens to arrive.
+    const cssW = Math.max(1, window.innerWidth);
+    const cssH = Math.max(1, window.innerHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     this.cssW = cssW;
 

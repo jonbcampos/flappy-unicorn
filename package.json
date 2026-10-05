@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "art": "node scripts/generate-art.mjs",
+    "art:shrink": "node scripts/shrink-art.mjs",
+    "sound": "node scripts/generate-sound.mjs",
+    "icons": "node scripts/make-icons.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

@@ -1,0 +1,73 @@
+{
+  "generated": [
+    "unicorn.motion",
+    "fairy.motion",
+    "kid.motion",
+    "bomb.motion",
+    "gate.arch",
+    "gate.tower",
+    "gate.brick",
+    "sky.day",
+    "sky.dusk",
+    "far.meadow",
+    "far.town",
+    "mid.meadow",
+    "mid.town",
+    "ground.meadow",
+    "ground.town",
+    "title"
+  ],
+  "ext": "jpg",
+  "opaque": [
+    "sky.day",
+    "sky.dusk",
+    "ground.meadow",
+    "ground.town",
+    "title"
+  ],
+  "additive": [],
+  "keyTop": [
+    "far.meadow",
+    "far.town",
+    "mid.meadow",
+    "mid.town"
+  ],
+  "sheets": {
+    "unicorn.motion": {
+      "cols": 4,
+      "rows": 2,
+      "align": "center",
+      "rowIds": [
+        "fly",
+        "pose"
+      ]
+    },
+    "fairy.motion": {
+      "cols": 2,
+      "rows": 2,
+      "align": "center",
+      "rowIds": [
+        "fly",
+        "saved"
+      ]
+    },
+    "kid.motion": {
+      "cols": 2,
+      "rows": 2,
+      "align": "center",
+      "rowIds": [
+        "wave",
+        "saved"
+      ]
+    },
+    "bomb.motion": {
+      "cols": 4,
+      "rows": 2,
+      "align": "center",
+      "rowIds": [
+        "fuse",
+        "fizzle"
+      ]
+    }
+  }
+}

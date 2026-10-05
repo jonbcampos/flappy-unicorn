@@ -434,3 +434,130 @@ had been the one file that diverged.
 
 **Revisit if:** it diverges again. The next divergence is the argument for
 extracting the shared core into a package rather than copying it a fourth time.
+
+## 25. Generated art, on top of the procedural game and never instead of it
+
+Ellie plays games that are "fully immersive", and the procedural rectangles weren't. So the
+Gemini pipeline from `../slingshot` (itself from `../tower-defense`) is ported: `npm run art`,
+`npm run art:shrink`, `scripts/art-manifest.mjs`, `src/render/sprites.ts`, and `__game.checkArt()`.
+ART-PLAN.md is the plan and the reasoning; this entry is what happened.
+
+**Sixteen images**, 1.5 MB after shrinking (22 MB as generated): Ellie on the unicorn (4×2), the
+fairy (2×2), the kid on a cloud (2×2), the bomb (4×2: fuse, then fizzle into confetti), three gate
+pillars, a day and a sunset sky, a far and a mid scenery strip for each biome, a ground strip for
+each biome, and the title picture. All four sheets pass `checkArt()`.
+
+**Rejected and regenerated:**
+
+- **The bomb**, first draw: two of the four fuse frames came back *light blue*. Rule 13 (the bomb
+  is the darkest thing on screen) isn't negotiable, so it was redrawn with "the SAME near-black
+  navy in every cell, never light blue". Second draw is right.
+- **The fairy**, first draw: a soft yellow glow around her ("she glows warm gold") and a different
+  shade of green in each quadrant. A glow against a chroma key is a fringe waiting to happen, and
+  the halo is the game's job anyway. Redrawn with "no glow, a crisp outline against the green".
+- **The unicorn sheet**: the first draw gave Ellie swirly dizzy eyes in the wings-down frame (and
+  a sparkle on the horn). Two retries both kept the dizzy eyes *and* printed a caption under every
+  cell ("GLIDING", "WINGS UP"…). The first draw is the one shipped: the wings-down frame shows for
+  about 60 ms per flap and her eyes are three pixels across in play, while a caption would need a
+  crop. Retry budget spent; tower-defense 27's rule (stop paying for retries the code can absorb).
+  The two rejected sheets are not in the repo.
+
+**Scenery that is green goes on magenta**, as slingshot's toot clouds did, and strips run off the
+bottom of their picture, so the loader keys them on the *top* corners only (`keyTop` in
+`index.json`). Otherwise the key colour is averaged with mud.
+
+**Revisit if:** a sheet needs redrawing: the prompts are tighter now, so `--only=<id> --force`.
+
+## 26. A painted gate is a texture clipped to its hitbox
+
+The white lip *is* the gap (decision 15), so painted gates must not move it by a pixel. Each
+pillar is measured at load (the straight shaft, the wider cap above it), the shaft is scaled to
+`GATE.width`, the cap is placed at the opening end, the middle is tiled with every other copy
+mirrored, and the whole column is clipped to the exact hitbox rectangle. The procedural lip goes on
+top, unchanged, plus a 1 px dark line down each side: the painting's own outline is soft at 26 px,
+and a pale sandstone column in front of pale cottages has to be the crispest vertical on screen.
+A column hanging from the ceiling is the same picture flipped, so its cap faces the gap too.
+
+## 27. Ellie rides the unicorn, and the frame comes from what just happened
+
+The voice lines are Ellie's, so she's on its back, in tower-defense's exact words for her. The
+painting is wider and taller than the 28×20 body, but it's fitted so the unicorn's *barrel* lands
+on the hurtbox centre (`LOOK.unicornBodyX/Y`), so the part that collides is the part you see; the
+rider, wings, horn and tail are decoration, which is the deal decision 20 already made.
+
+Frames are picked by state, not by a clock: dizzy when the run's over, "oops" through a bump, the
+zap pose as magic leaves the horn, a cheer after a rescue, the wing cycle once per flap, a glide in
+between, a lazy flap during the hover. Every flap kicks a damped spring for squash-and-stretch, and
+a bump kicks it the other way. The i-frame blink fades her to 35% instead of hiding her: Ellie
+flickering out of existence reads as something bad happening to her.
+
+The bomb's red pulse and the fairy's amber halo ring stay procedural under the paintings: "dark,
+fused, pulsing red" and "bright, haloed" (decision 13) must survive any art.
+
+## 28. The painted world: parallax, drifting clouds, a sunset
+
+Back to front: the sky; its clouds, lifted out and drifting on their own wind (each with a smaller,
+fainter copy behind it); the far strip at 0.18 of world speed; a haze; the mid strip at 0.42; the
+play field; the ground strip at full speed. Two things differ from slingshot:
+
+- **The sky is a gradient, not a repaint.** `backdrop.ts`'s per-pixel sky model left a bright seam
+  right across this sky where a row was mostly cloud. The sky here only changes top to bottom, so
+  it's drawn as each row's 30th-percentile colour (clouds are lighter than the sky behind them),
+  smoothed. It can't seam: every row is one colour. The clouds still come from `backdrop.ts`.
+- **Biomes on slow layers.** A far tile spans more than a whole biome, so the far layer cross-fades
+  meadow ↔ town by where the player is. Mid tiles take their biome from where the player will be
+  when the tile is mid-screen (decision 22's trick), and the first tile of a new biome fades in over
+  the old one, so a cottage is never sliced by a straight line.
+
+**A run flies into the evening:** the sunset sky fades in between 7,000 and 15,000 px, and the
+scenery warms with it (`LOOK.duskFrom/duskTo`). The world changing as you go is half of what makes
+a run feel like a journey rather than a loop.
+
+## 29. Juice: confetti, hearts, a title that's alive, fades instead of cuts
+
+- A zapped bomb fizzles into **confetti** (it tumbles and foreshortens as it spins) and stars, plus
+  the painted fizzle flipbook. Nobody is hurt: it's a party popper.
+- A rescue throws **hearts and twinkles**, and the one you saved floats up cheering.
+- The unicorn sheds a trail of rainbow **twinkles**; a gate puffs glitter; a bump rings dizzy stars,
+  with a soft pink flash and the existing shake.
+- **The title is painted and moving**: Ellie swoops on the left, the fairy and the kid bob on the
+  right (from their own sheets, so they're the same characters), the picture breathes.
+- **No hard cuts**: the run opens with a fade from white, the game-over card eases in and drops
+  gently into place.
+
+The particle pool grew from 140 to 280 and is still fixed. Without the art, every effect still
+plays except the painted sprites.
+
+## 30. Music, voices and a new set of effects
+
+The same split slingshot settled on (its decisions 16, 18, 19): Gemini makes the voices and the
+music (`npm run sound`, `scripts/sound-manifest.mjs`), effects are synthesised sample by sample
+(`src/core/sfx.ts`), and everything goes through a compressor and a short procedural reverb.
+
+- **Music (Lyria):** a dreamy title theme; an airy harp-and-flute meadow track; a lute-and-recorder
+  town track. The flight music **crossfades at the biome boundary**, so you hear the town arrive.
+  Loops are the steady RMS stretch of each clip, crossfaded.
+- **Voices, few and short:** Ellie (Zephyr, rate 1, slingshot's exact profile) says "Let's fly!",
+  "Wheee!", "Yay!", "Got it!", "Uh-oh!", "Oh no!". The fairy squeaks "Thank you!", the kid
+  "Yippee!", both sped up so they're clearly not her. `Chatter` in main.ts keeps it quiet: one voice
+  at a time, 4.5 s of quiet after any optional line, and most lines are a chance (a rescue 60%, a
+  zap 30%, a streak or a new sector now and then). The ones that carry information (a bump, the end
+  of the run, the start) always play. Voices duck the music.
+- **Effects:** a feathery wing-beat, a sparkle glissando for magic, a soft "pfoomp" and fizz with
+  tinkles for a zapped bomb, a four-bell arpeggio for a rescue, a bell chime per gate that **climbs a
+  pentatonic scale with the streak** (a bump resets it), a woodblock-and-spring bonk for a bump (it
+  says "oops", not "ow"), a muted-trumpet "wah-wah-waaah" for game over, a harp run for a new sector.
+  Rescues still rise and hazards still fall.
+- **Two toggles, both persisted:** SOUND and MUSIC, separately, on the title and game-over screens.
+  The context starts on the first gesture, is suspended when the page is hidden and resumed when it
+  comes back.
+
+**Revisit if:** she finds the voices chatty; turn the chances down in `presentEvent` before cutting
+lines.
+
+## 31. `__game.advance(seconds)` for screenshots
+
+The preview pane throttles animation frames hard enough that a run barely moves between console
+calls. `advance` steps the real loop body and draws, so a moment (a rescue, a zap, the town, the
+sunset) can be reached deterministically and then looked at. It's a dev handle beside `step`, and
+like `verify()` it drives the real `GameState`, never a copy.

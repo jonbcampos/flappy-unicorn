@@ -471,3 +471,52 @@ export const JUICE = {
   /** How long the sector banner stays up. */
   sectorFlash: 1.4,
 } as const;
+
+// --- Look -------------------------------------------------------------------
+
+/**
+ * How the generated art is fitted and moved. Presentation only: nothing in
+ * `src/game/` reads these, and the fairness contracts never see them. They
+ * live here because every tuning number does (ART-PLAN.md has the reasoning).
+ */
+export const LOOK = {
+  /**
+   * The painted unicorn (with Ellie on board), fitted by its content width.
+   * Wider than the 28px procedural body because the art includes the tail and
+   * a rider; the hurtbox is unchanged (see UNICORN).
+   */
+  unicornArtWidth: 50,
+  /**
+   * Where the unicorn's barrel sits in the painted frame, as fractions of the
+   * content box. That point is placed on the hurtbox centre, so the body you
+   * see is the body that collides, and Ellie and the wings sit above it.
+   */
+  unicornBodyX: 0.5,
+  unicornBodyY: 0.74,
+  /** Flap squash-and-stretch: the kick, the spring and its damping. */
+  squashKick: 0.22,
+  squashSpring: 260,
+  squashDamping: 14,
+
+  /** Painted rescues and bombs, fitted by content height / ball width. */
+  fairyArtHeight: 22,
+  kidArtHeight: 23,
+
+  /** Parallax: the fraction of the world's speed each layer scrolls at. */
+  farRate: 0.18,
+  midRate: 0.42,
+  /** Tile widths in virtual px; heights follow the art's aspect. */
+  farTileWidth: 440,
+  midTileWidth: 330,
+  /** Clouds drift on their own wind as well as with the parallax. */
+  cloudWind: 7,
+  cloudRate: 0.05,
+
+  /** The sky turns to sunset between these distances into a run. */
+  duskFrom: 7000,
+  duskTo: 15000,
+
+  /** Seconds of the fade from white as a run begins, and into game over. */
+  startFade: 0.55,
+  gameOverFade: 0.45,
+} as const;

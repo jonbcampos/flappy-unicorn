@@ -2,7 +2,7 @@ import type { Renderer } from './renderer';
 import { drawBackground, drawCeiling, drawFloor } from './sky';
 import { drawBombs, drawFairies, drawGates, drawShots, drawUnicorn } from './rainbow';
 import { drawHud, drawPopups } from '../ui/hud';
-import { drawScreens } from '../ui/screens';
+import { drawScreens, screenClock } from '../ui/screens';
 import { drawTouchpad } from '../ui/touchpad';
 
 /**
@@ -28,7 +28,7 @@ export const sceneRenderer: Renderer = {
       ctx.translate(Math.sin(angle) * state.shake, Math.cos(angle * 1.7) * state.shake * 0.6);
     }
 
-    drawBackground(ctx, state.distance);
+    drawBackground(ctx, state.distance, screenClock());
     drawBombs(ctx, state, interpolation);
     drawGates(ctx, state, interpolation);
     drawFairies(ctx, state, interpolation);

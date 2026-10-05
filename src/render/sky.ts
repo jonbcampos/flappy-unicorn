@@ -2,12 +2,16 @@ import {
   BIOME_SPAN,
   CEILING_Y,
   FLOOR_Y,
+  LOOK,
+  PLAYER_X,
   SCREEN,
   VIRTUAL_H,
   biomeAt,
   type Biome,
 } from '../game/config';
+import { cleanSky, type CleanSky } from './backdrop';
 import { PALETTE, alpha } from './palette';
+import { frameBounds, sprite } from './sprites';
 
 /**
  * The world behind the game.
@@ -71,7 +75,9 @@ export function drawCeiling(ctx: CanvasRenderingContext2D, distance: number): vo
  */
 export function drawFloor(ctx: CanvasRenderingContext2D, distance: number): void {
   forEachBiomeSpan(distance, (biome, screenX, spanW, spanWorldX) => {
-    if (biome === 'town') drawCobbles(ctx, screenX, spanW, spanWorldX);
+    const art = sprite(biome === 'town' ? 'ground.town' : 'ground.meadow');
+    if (art) drawGroundArt(ctx, art, biome, screenX, spanW, spanWorldX);
+    else if (biome === 'town') drawCobbles(ctx, screenX, spanW, spanWorldX);
     else drawMeadow(ctx, screenX, spanW, spanWorldX);
   });
 
@@ -80,6 +86,53 @@ export function drawFloor(ctx: CanvasRenderingContext2D, distance: number): void
   // stays visible without the line ever breaking.
   ctx.fillStyle = PALETTE.floorLip;
   ctx.fillRect(0, FLOOR_Y, SCREEN.w, 3);
+}
+
+/**
+ * The painted ground strip, tiled along the world with every other copy
+ * mirrored (the seam hides without asking the model for a seamless tile), and
+ * drawn strictly below the lip. The top few percent of each picture is cropped:
+ * the model paints a sliver of sky above its grass.
+ */
+const GROUND_CROP: Record<Biome, number> = { meadow: 0.1, town: 0.07 };
+
+function drawGroundArt(
+  ctx: CanvasRenderingContext2D,
+  art: HTMLCanvasElement,
+  biome: Biome,
+  screenX: number,
+  spanW: number,
+  spanWorldX: number,
+): void {
+  const crop = Math.round(art.height * GROUND_CROP[biome]);
+  const srcH = art.height - crop;
+  const h = VIRTUAL_H - FLOOR_Y;
+  const tileW = (art.width * h) / srcH;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(screenX, FLOOR_Y, spanW, h);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  const first = Math.floor(spanWorldX / tileW);
+  for (let k = first; k * tileW < spanWorldX + spanW; k++) {
+    const x = screenX + (k * tileW - spanWorldX);
+    if (k % 2 === 0) {
+      ctx.drawImage(art, 0, crop, art.width, srcH, x, FLOOR_Y, tileW + 0.5, h);
+    } else {
+      ctx.save();
+      ctx.translate(x + tileW, FLOOR_Y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(art, 0, crop, art.width, srcH, 0, 0, tileW + 0.5, h);
+      ctx.restore();
+    }
+  }
+  // Knock the painted street back a little: it's the busiest picture on
+  // screen and it's the least important.
+  if (biome === 'town') {
+    ctx.fillStyle = 'rgba(236,226,240,0.22)';
+    ctx.fillRect(screenX, FLOOR_Y, spanW, h);
+  }
+  ctx.restore();
 }
 
 function drawMeadow(
@@ -163,7 +216,25 @@ export function forEachBiomeSpan(
 
 // --- parallax ---------------------------------------------------------------
 
-export function drawBackground(ctx: CanvasRenderingContext2D, distance: number): void {
+/**
+ * How far into sunset the sky is, 0..1, from how far the run has gone. A long
+ * run flies on into the evening: the world changing as you go is half of what
+ * makes it feel like a journey rather than a loop.
+ */
+export function duskAmount(distance: number): number {
+  const t = (distance - LOOK.duskFrom) / (LOOK.duskTo - LOOK.duskFrom);
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * (3 - 2 * c);
+}
+
+/**
+ * The background. Painted when the art is there, procedural otherwise.
+ *
+ * `time` is the render clock in seconds, so the clouds drift on their own wind
+ * even while the world holds still (the title, the hover before a run).
+ */
+export function drawBackground(ctx: CanvasRenderingContext2D, distance: number, time = 0): void {
+  if (drawPaintedBackground(ctx, distance, time)) return;
   const sky = ctx.createLinearGradient(0, 0, 0, FLOOR_Y);
   sky.addColorStop(0, PALETTE.skyTop);
   sky.addColorStop(1, PALETTE.skyBottom);
@@ -398,4 +469,293 @@ function drawPetals(ctx: CanvasRenderingContext2D, offset: number): void {
     const tumble = (seed >>> 3) % 3;
     ctx.fillRect(Math.round(x), Math.round(y), 3 - tumble, 1 + tumble);
   }
+}
+
+// --- painted backdrop ---------------------------------------------------------
+
+/**
+ * The painted world, back to front (ART-PLAN.md, rendering step 2):
+ *
+ *  1. The sky, still, with its clouds lifted out (backdrop.ts) and the sunset
+ *     sky cross-faded over it as the run goes on.
+ *  2. The lifted clouds, drifting on a slow wind and a little parallax, each
+ *     with a smaller, fainter copy behind it for depth.
+ *  3. The far strip (distant hills, or the town's skyline) at 0.18 of the
+ *     world's speed. It cross-fades between meadow and town as you pass the
+ *     boundary, because a far tile spans more than a whole biome.
+ *  4. The mid strip (near hills and trees, or cottages) at 0.42, each tile
+ *     taking its biome from where the player will be when it's on screen.
+ *
+ * Nothing here is shaped like a gate, a bomb or a fairy (DECISIONS.md 14).
+ */
+function drawPaintedBackground(ctx: CanvasRenderingContext2D, distance: number, time: number): boolean {
+  const day = sprite('sky.day');
+  if (!day) return false;
+  const daySky = cleanSky(day);
+  const duskArt = sprite('sky.dusk');
+  const duskSky = duskArt ? cleanSky(duskArt) : null;
+  const dusk = duskArt ? duskAmount(distance) : 0;
+
+  drawSkyImage(ctx, skyGradient(day), 1);
+  if (dusk > 0 && duskArt) drawSkyImage(ctx, skyGradient(duskArt), dusk);
+  if (daySky && dusk < 1) drawDriftingClouds(ctx, daySky, day, distance, time, 1 - dusk);
+  if (duskSky && duskArt && dusk > 0) drawDriftingClouds(ctx, duskSky, duskArt, distance, time, dusk);
+
+  // Far layer: both biomes, cross-faded by where the player is.
+  const town = townMix(distance + PLAYER_X);
+  const farMeadow = sprite('far.meadow');
+  const farTown = sprite('far.town');
+  if (farMeadow && town < 1) drawStrip(ctx, farMeadow, distance * LOOK.farRate, LOOK.farTileWidth, 0.78 * (1 - town));
+  if (farTown && town > 0) drawStrip(ctx, farTown, distance * LOOK.farRate, LOOK.farTileWidth, 0.85 * town);
+
+  // A haze between far and mid, the colour of the bottom of the sky: distance
+  // made visible, and it pushes the scenery back behind the play field.
+  const haze = ctx.createLinearGradient(0, FLOOR_Y - 90, 0, FLOOR_Y);
+  haze.addColorStop(0, 'rgba(255,236,240,0)');
+  haze.addColorStop(1, `rgba(255,236,240,${0.35 - dusk * 0.15})`);
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, FLOOR_Y - 90, SCREEN.w, 90);
+
+  drawMidStrip(ctx, distance);
+  // And a lighter haze over the mid strip: it's scenery, so it must sit back
+  // from the gates, which are the brightest, crispest verticals on screen.
+  const nearHaze = ctx.createLinearGradient(0, FLOOR_Y - 80, 0, FLOOR_Y);
+  nearHaze.addColorStop(0, 'rgba(240,246,255,0)');
+  nearHaze.addColorStop(0.35, 'rgba(240,246,255,0.3)');
+  nearHaze.addColorStop(1, 'rgba(240,246,255,0.14)');
+  ctx.fillStyle = nearHaze;
+  ctx.fillRect(0, FLOOR_Y - 80, SCREEN.w, 80);
+  drawPetals(ctx, distance * 0.42);
+
+  if (dusk > 0) {
+    // The scenery warms with the sky. Multiply, so it tints rather than fogs.
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgba(255,190,170,${0.45 * dusk})`;
+    ctx.fillRect(0, CEILING_Y, SCREEN.w, FLOOR_Y - CEILING_Y);
+    ctx.restore();
+  }
+  return true;
+}
+
+const gradients = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
+/**
+ * The sky without its clouds, as a one-pixel-wide column of colour: each row's
+ * median, smoothed down the rows, stretched across the frame.
+ *
+ * backdrop.ts repaints the sky under the clouds it lifts out, which suits
+ * slingshot's dusk sky with its left-to-right sweep. On this sky it left a
+ * bright seam right across the frame, where a row was mostly cloud. A sky that
+ * only changes top to bottom doesn't need a per-pixel model, and this one
+ * can't leave a seam: every row is one colour by construction.
+ */
+function skyGradient(source: HTMLCanvasElement): HTMLCanvasElement {
+  const cached = gradients.get(source);
+  if (cached) return cached;
+  const out = document.createElement('canvas');
+  out.width = 1;
+  out.height = source.height;
+  const octx = out.getContext('2d');
+  const sctx = source.getContext('2d', { willReadFrequently: true });
+  if (!octx || !sctx) return source;
+  let data: Uint8ClampedArray;
+  try {
+    data = sctx.getImageData(0, 0, source.width, source.height).data;
+  } catch {
+    return source;
+  }
+  const w = source.width;
+  const h = source.height;
+  const rows = new Float32Array(h * 3);
+  const channel = new Uint8Array(w);
+  for (let y = 0; y < h; y++) {
+    for (let c = 0; c < 3; c++) {
+      for (let x = 0; x < w; x++) channel[x] = data[(y * w + x) * 4 + c]!;
+      channel.sort();
+      // The 30th percentile rather than the median: clouds are lighter than
+      // the sky behind them, so the darker part of a row is the sky.
+      rows[y * 3 + c] = channel[Math.floor(w * 0.3)]!;
+    }
+  }
+  const img = octx.createImageData(1, h);
+  const R = 10;
+  for (let y = 0; y < h; y++) {
+    for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      let n = 0;
+      for (let k = Math.max(0, y - R); k <= Math.min(h - 1, y + R); k++) {
+        sum += rows[k * 3 + c]!;
+        n++;
+      }
+      img.data[y * 4 + c] = sum / n;
+    }
+    img.data[y * 4 + 3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+  gradients.set(source, out);
+  return out;
+}
+
+/** Cover the frame with the sky picture, top-aligned. */
+function drawSkyImage(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, a: number): void {
+  // The same vertical scale as the clouds use, so they sit where they were painted.
+  const day = sprite('sky.day');
+  const ref = day ?? image;
+  const scale = Math.max(SCREEN.w / ref.width, FLOOR_Y / ref.height);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(image, 0, 0, Math.max(SCREEN.w, image.width * scale), image.height * (ref.height / image.height) * scale);
+  ctx.restore();
+}
+
+function drawDriftingClouds(
+  ctx: CanvasRenderingContext2D,
+  sky: CleanSky,
+  source: HTMLCanvasElement,
+  distance: number,
+  time: number,
+  a: number,
+): void {
+  const scale = Math.max(SCREEN.w / source.width, FLOOR_Y / source.height);
+  const period = source.width * scale + 120;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  const drift = time * LOOK.cloudWind + distance * LOOK.cloudRate;
+  // Back copies first: smaller, fainter, slower, lower, offset by half a lap.
+  for (const layer of [0, 1]) {
+    const k = layer === 0 ? 0.55 : 1;
+    ctx.globalAlpha = a * (layer === 0 ? 0.3 : 0.95);
+    for (const cloud of sky.clouds) {
+      const w = cloud.image.width * scale * k;
+      const h = cloud.image.height * scale * k;
+      const baseX = cloud.x * scale + (layer === 0 ? period * 0.5 : 0);
+      let x = (baseX - drift * k) % period;
+      if (x < -w - 60) x += period;
+      const y = cloud.y * scale * (layer === 0 ? 1.15 : 1) + (layer === 0 ? 14 : 0);
+      ctx.drawImage(cloud.image, x - 60, y, w, h);
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * 0 in the meadow, 1 in the town, eased across the boundary over a short run,
+ * so the far skyline dissolves from one to the other as you fly past it.
+ */
+function townMix(worldX: number): number {
+  const blend = 260;
+  const span = Math.floor(worldX / BIOME_SPAN);
+  const into = worldX - span * BIOME_SPAN;
+  const here = span % 2 === 0 ? 0 : 1;
+  const prev = 1 - here;
+  if (into >= blend) return here;
+  const t = into / blend;
+  const e = t * t * (3 - 2 * t);
+  return prev + (here - prev) * e;
+}
+
+/** One strip layer, tiled, every other copy mirrored, sat on the floor line. */
+function drawStrip(ctx: CanvasRenderingContext2D, art: HTMLCanvasElement, offset: number, tileW: number, a: number): void {
+  const s = tileW / art.width;
+  const box = frameBounds(art);
+  const bottom = (box.y + box.h) * s;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.imageSmoothingEnabled = true;
+  const first = Math.floor(offset / tileW);
+  for (let k = first; (k - first) * tileW < SCREEN.w + tileW * 2; k++) {
+    drawTile(ctx, art, k * tileW - offset, FLOOR_Y + 1 - bottom, tileW, art.height * s, k % 2 === 1);
+  }
+  ctx.restore();
+}
+
+function drawMidStrip(ctx: CanvasRenderingContext2D, distance: number): void {
+  const meadow = sprite('mid.meadow');
+  const town = sprite('mid.town');
+  if (!meadow && !town) return;
+  const tileW = LOOK.midTileWidth;
+  const offset = distance * LOOK.midRate;
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  const first = Math.floor(offset / tileW);
+  for (let k = first; (k - first) * tileW < SCREEN.w + tileW * 2; k++) {
+    const x = k * tileW - offset;
+    // The biome the PLAYER will be in when this tile is mid-screen, so the
+    // cottages arrive with the cobbles rather than a biome early or late.
+    const art = midArtFor(k, meadow, town);
+    const prev = midArtFor(k - 1, meadow, town);
+    ctx.globalAlpha = 0.92;
+    if (prev !== art) {
+      // The first tile of a new biome: the old scenery carries on underneath
+      // and the new one fades in across it, so a cottage is never sliced in
+      // half by a straight line.
+      drawMidTile(ctx, prev, x, tileW, k % 2 === 1);
+      drawMidTile(ctx, fadeInFromLeft(art, k % 2 === 1), x, tileW, k % 2 === 1);
+    } else drawMidTile(ctx, art, x, tileW, k % 2 === 1);
+  }
+  ctx.restore();
+}
+
+function midArtFor(k: number, meadow: HTMLCanvasElement | null, town: HTMLCanvasElement | null): HTMLCanvasElement {
+  const tileW = LOOK.midTileWidth;
+  // The biome the PLAYER will be in when this tile is mid-screen, so the
+  // cottages arrive with the cobbles rather than a biome early or late.
+  const centre = k * tileW + tileW / 2;
+  const seen = Math.max(0, (centre - SCREEN.w / 2) / LOOK.midRate + SCREEN.w / 2);
+  return (biomeAt(seen) === 'town' ? town : meadow) ?? meadow ?? town!;
+}
+
+function drawMidTile(ctx: CanvasRenderingContext2D, art: HTMLCanvasElement, x: number, tileW: number, mirrored: boolean): void {
+  const s = tileW / art.width;
+  const box = frameBounds(art);
+  drawTile(ctx, art, x, FLOOR_Y + 2 - (box.y + box.h) * s, tileW, art.height * s, mirrored);
+}
+
+/** One reusable scratch canvas per strip picture: the picture, faded in over its left half. */
+const fades = [new WeakMap<HTMLCanvasElement, HTMLCanvasElement>(), new WeakMap<HTMLCanvasElement, HTMLCanvasElement>()];
+/** `mirrored`: the tile is drawn flipped, so the SOURCE fades in from its right. */
+function fadeInFromLeft(art: HTMLCanvasElement, mirrored: boolean): HTMLCanvasElement {
+  const cache = fades[mirrored ? 1 : 0]!;
+  const cached = cache.get(art);
+  if (cached) return cached;
+  const out = document.createElement('canvas');
+  out.width = art.width;
+  out.height = art.height;
+  const c = out.getContext('2d');
+  if (!c) return art;
+  c.drawImage(art, 0, 0);
+  c.globalCompositeOperation = 'destination-in';
+  const g = mirrored
+    ? c.createLinearGradient(art.width, 0, art.width * 0.4, 0)
+    : c.createLinearGradient(0, 0, art.width * 0.6, 0);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,1)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, art.width, art.height);
+  // Same content box as the original, so it sits on the same floor line.
+  cache.set(art, out);
+  return out;
+}
+
+function drawTile(
+  ctx: CanvasRenderingContext2D,
+  art: HTMLCanvasElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  mirrored: boolean,
+): void {
+  if (x > SCREEN.w || x + w < 0) return;
+  if (!mirrored) {
+    ctx.drawImage(art, x, y, w + 0.5, h);
+    return;
+  }
+  ctx.save();
+  ctx.translate(x + w, y);
+  ctx.scale(-1, 1);
+  ctx.drawImage(art, 0, 0, w + 0.5, h);
+  ctx.restore();
 }

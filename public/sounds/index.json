@@ -1,0 +1,28 @@
+{
+  "ext": "m4a",
+  "voices": [
+    "e.go",
+    "e.whee",
+    "e.yay",
+    "e.gotit",
+    "e.uhoh",
+    "e.ohno",
+    "f.thanks",
+    "k.yippee"
+  ],
+  "music": [
+    "music.title",
+    "music.meadow",
+    "music.town"
+  ],
+  "rates": {
+    "e.go": 1,
+    "e.whee": 1,
+    "e.yay": 1,
+    "e.gotit": 1,
+    "e.uhoh": 1,
+    "e.ohno": 1,
+    "f.thanks": 1.4,
+    "k.yippee": 1.3
+  }
+}

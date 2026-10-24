@@ -16,7 +16,7 @@
  * time the icon exists the game is already fully cached.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v4';
 const CACHE = `flappy-unicorn-${VERSION}`;
 
 // The shell has stable, known names, so it can be cached up front.

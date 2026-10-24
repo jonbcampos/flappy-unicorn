@@ -561,3 +561,30 @@ The preview pane throttles animation frames hard enough that a run barely moves 
 calls. `advance` steps the real loop body and draws, so a moment (a rescue, a zap, the town, the
 sunset) can be reached deterministically and then looked at. It's a dev handle beside `step`, and
 like `verify()` it drives the real `GameState`, never a copy.
+
+## 32. Ellie's own voice
+
+Ellie recorded her lines (2026-10-17, phone under a blanket; script in ../ELLIE-VOICE-SCRIPT.md).
+`../recordings/cut.py` cuts the memos into clips: high-pass, light denoise, trimmed to the speech,
+soft-limited, and set to the TTS lines' loudness so nothing jumps out. They replace the Zephyr TTS
+clips under the same ids, still at `rate: 1`. The TTS originals are in
+`../recordings/tts-backup/flappy-unicorn/`.
+
+A line can now have more than one take: `e.yay.m4a`, `e.yay.2.m4a`, ... `say()` picks a line, then
+a random loaded take of it (`take()` in src/core/audio.ts), and `--reindex` lists the takes.
+Ellie's profile in sound-manifest.mjs is `recorded: true`, so generate-sound.mjs never
+regenerates her, not even with `--force`. Service worker bumped so installed copies fetch
+the new clips.
+
+**Revisit if:** a take sounds wrong (cut by level and checked with speech-to-text, not by ear):
+drop it from `TAKES` in cut.py and rerun it, then `npm run sound -- --reindex`.
+
+
+## 33. Drawing at most 60 times a second (2026-10-24)
+
+"Every time she plays on my phone my phone definitely gets hot... this is the same for all games."
+The simulation still steps 120 times a second, but `core/loop.ts` now draws a picture at most
+60 times a second, whatever the screen's refresh rate: a 120Hz phone was drawing twice as often as
+the game needed. Measured on a laptop, a frame of this game costs well under a millisecond to
+draw, so the rate was the waste, not the drawing. The same loop file is shared by every game in
+the set; a dev-only `__loop.render(alpha)` lets the console time one frame directly.

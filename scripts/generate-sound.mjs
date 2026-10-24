@@ -197,7 +197,13 @@ function writeIndex() {
   const rates = Object.fromEntries(
     SOUNDS.filter((s) => s.kind === 'voice' && s.who.rate).map((s) => [s.id, s.who.rate]),
   );
-  const index = { ext: 'm4a', voices: present('voice'), music: present('music'), rates };
+  // A recorded line can have extra takes, `<id>.2.m4a` and up; the game picks one at random.
+  const takes = (id) => {
+    const all = [id];
+    for (let n = 2; existsSync(join(OUT_DIR, `${id}.${n}.m4a`)); n++) all.push(`${id}.${n}`);
+    return all;
+  };
+  const index = { ext: 'm4a', voices: present('voice').flatMap(takes), music: present('music'), rates };
   writeFileSync(INDEX_FILE, `${JSON.stringify(index, null, 2)}\n`);
   return index;
 }
@@ -224,6 +230,11 @@ async function main() {
 
   const failed = [];
   for (const s of wanted) {
+    if (s.who?.recorded) {
+      // Real recordings (../recordings/cut.py): never overwritten, not even by --force.
+      console.log(`  rec   ${s.id}`);
+      continue;
+    }
     const out = join(OUT_DIR, `${s.id}.m4a`);
     if (existsSync(out) && !FORCE) {
       console.log(`  skip  ${s.id}`);

@@ -163,6 +163,8 @@ export class Audio {
   private readonly raw = new Map<string, ArrayBuffer>();
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly rates = new Map<string, number>();
+  /** Extra recorded takes of a line (`e.yay.2`, `e.yay.3`), from the index. */
+  private readonly takes = new Map<string, string[]>();
   private voiceUntil = 0;
   private music: { id: string; gain: GainNode; sources: AudioBufferSourceNode[]; nextAt: number } | null = null;
   private wantMusic = '';
@@ -181,6 +183,10 @@ export class Audio {
       }
       const ext = index.ext ?? 'm4a';
       for (const [id, rate] of Object.entries(index.rates ?? {})) this.rates.set(id, rate);
+      for (const id of index.voices ?? []) {
+        const line = /^(.+)\.\d+$/.exec(id)?.[1];
+        if (line) this.takes.set(line, [...(this.takes.get(line) ?? []), id]);
+      }
       // Voices first: they're small and used from the first second. Then the
       // title music, because that's what plays first.
       const music = [...(index.music ?? [])].sort((a, b) => (a === 'music.title' ? -1 : b === 'music.title' ? 1 : 0));
@@ -218,6 +224,12 @@ export class Audio {
     return this.ctx !== null && this.ctx.currentTime < this.voiceUntil;
   }
 
+  /** One of a line's recorded takes at random, so a line heard often doesn't wear out. */
+  private take(line: string): string {
+    const loaded = [line, ...(this.takes.get(line) ?? [])].filter((id) => this.buffers.has(id));
+    return loaded[Math.floor(Math.random() * loaded.length)]!;
+  }
+
   /**
    * Say one of `ids`, at random. Returns false if none is loaded (or sound is
    * off), so the caller knows nothing was said.
@@ -232,11 +244,12 @@ export class Audio {
     const ctx = this.ctx;
     const at = ctx.currentTime + (opts.delay ?? 0);
     if (at < this.voiceUntil && !opts.interrupt) return false;
-    const id = ready[Math.floor(Math.random() * ready.length)]!;
+    const line = ready[Math.floor(Math.random() * ready.length)]!;
+    const id = this.take(line);
     const buffer = this.buffers.get(id)!;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    const rate = (this.rates.get(id) ?? 1) * (0.97 + Math.random() * 0.06);
+    const rate = (this.rates.get(line) ?? 1) * (0.97 + Math.random() * 0.06);
     source.playbackRate.value = rate;
     const gain = ctx.createGain();
     gain.gain.value = opts.gain ?? 0.95;

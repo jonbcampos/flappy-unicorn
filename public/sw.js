@@ -16,18 +16,23 @@
  * time the icon exists the game is already fully cached.
  */
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `flappy-unicorn-${VERSION}`;
 
 // The shell has stable, known names, so it can be cached up front.
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
+// Installing fetches with `cache: 'reload'`, past the browser's own HTTP cache:
+// GitHub Pages lets a file sit there for ten minutes, so a new version
+// installed soon after a deploy could otherwise save the OLD sounds and
+// pictures (which keep their names) into its fresh cache. That happened with
+// Trick or Treat's new music.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
       // Individually, so one failed entry doesn't abort the whole install.
-      .then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(url))))
+      .then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(new Request(url, { cache: 'reload' })))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -48,7 +53,12 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (request.mode === 'navigate') {
+  // Only the game's own page is kept as the offline copy of index.html.
+  // Opening a sound or picture straight from its link is a navigation too, and
+  // used to be saved as index.html, so the next offline launch got a music file.
+  const isPage = request.mode === 'navigate' && (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html'));
+  if (request.mode === 'navigate' && !isPage) return;
+  if (isPage) {
     event.respondWith(
       fetch(request)
         .then((response) => {
